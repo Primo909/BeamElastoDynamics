@@ -10,6 +10,7 @@ import argparse
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 import imageio
 
+
 def extract_edges(mesh):
     # Extract the element-to-node connectivity from the mesh
     mesh_connectivity = mesh.cells()  # Get element-to-node mapping
@@ -23,14 +24,15 @@ def extract_edges(mesh):
     bidir_edge_index = torch.cat([edge_index, edge_index.flip(0)], dim=1)
     return bidir_edge_index, mesh_connectivity
 
+
 def extract_node_masses(u_, du, rho):
     """
-    Compute node-wise lumped masses in 3D, re-ordered 
+    Compute node-wise lumped masses in 3D, re-ordered
     to match the same vertex indexing as mesh.coordinates().
     """
     from dolfin import dof_to_vertex_map
     import numpy as np
-    
+
     # Get the VectorFunctionSpace from u_
     V = u_.function_space()
 
@@ -68,11 +70,12 @@ def extract_node_masses(u_, du, rho):
         lumps_sub_vertex = lumps_sub[d2v]
         lumps_vertex[:, comp_i] = lumps_sub_vertex
 
-    return lumps_vertex  
+    return lumps_vertex
+
 
 def extract_mesh_bc(bc, V):
     """
-    Return a (num_vertices, 1) torch tensor of 0/1 indicating 
+    Return a (num_vertices, 1) torch tensor of 0/1 indicating
     which vertices are pinned (fully constrained in all components).
     """
     import numpy as np
@@ -85,7 +88,7 @@ def extract_mesh_bc(bc, V):
     num_components = V.num_sub_spaces() or V.ufl_element().value_size()
 
     # Filter to subcomponent=0 DOFs to identify the vertex
-    sub0_dofs = bc_dof_indices[ bc_dof_indices % num_components == 0 ]
+    sub0_dofs = bc_dof_indices[bc_dof_indices % num_components == 0]
     sub0_dofs = sub0_dofs // num_components
 
     # Collapse to scalar subspace 0
@@ -99,8 +102,9 @@ def extract_mesh_bc(bc, V):
     is_fixed = np.zeros(nverts, dtype=int)
     is_fixed[pinned_vertices] = 1
 
-    node_scalar = torch.tensor(is_fixed, dtype=torch.float).reshape(-1,1)
+    node_scalar = torch.tensor(is_fixed, dtype=torch.float).reshape(-1, 1)
     return node_scalar
+
 
 def plot_check(time, u_tip, energies, save_path):
     if MPI.comm_world.rank == 0:
@@ -121,13 +125,15 @@ def plot_check(time, u_tip, energies, save_path):
 
         plt.tight_layout()
         plt.savefig(save_path)
-        print('plot saved to :', save_path)
-        plt.show()
+        print("plot saved to :", save_path)
+        # plt.show()
+
 
 def save_graphs(lst_graph_tstep, save_path):
     gph_dataloader = DataLoader(lst_graph_tstep, batch_size=1, shuffle=False)
     torch.save(gph_dataloader, save_path)
-    print(f'saved graphs(dataloader) to {save_path}')
+    print(f"saved graphs(dataloader) to {save_path}")
+
 
 def evaluate_u_at_vertices(u, mesh):
     """
@@ -144,6 +150,7 @@ def evaluate_u_at_vertices(u, mesh):
         out[i] = u(*coords[i])  # Evaluate the solution at vertex i
     return out
 
+
 def evaluate_velocity_at_vertices(v_fun, mesh):
     """
     Evaluate velocity 'v_fun' (VectorFunction) at each mesh vertex.
@@ -156,48 +163,65 @@ def evaluate_velocity_at_vertices(v_fun, mesh):
         out[i] = v_fun(*coords[i])  # Evaluate v at (x,y,z)
     return out
 
+
 def evaluate_acceleration_at_vertices(a_fun, mesh):
     # same approach
     coords = mesh.coordinates()
     nverts = coords.shape[0]
-    out = np.zeros((nverts,3), dtype=float)
+    out = np.zeros((nverts, 3), dtype=float)
     for i in range(nverts):
         out[i] = a_fun(*coords[i])
     return out
+
 
 # ****** Evaluate force at vertices *******
 def evaluate_force_at_vertices(f, mesh):
     coords = mesh.coordinates()
     nverts = coords.shape[0]
-    out = np.zeros((nverts,3), dtype=float)
+    out = np.zeros((nverts, 3), dtype=float)
     for i in range(nverts):
         out[i] = f(*coords[i])
     return out
+
 
 def evaluate_stress_at_vertices(stress_fun, mesh):
     """
     Evaluate a 3D TensorFunction 'stress_fun' at each mesh vertex,
     returning shape (num_vertices, 9).
 
-    'stress_fun(*coords)' should return a 3x3 or (3,3) matrix 
+    'stress_fun(*coords)' should return a 3x3 or (3,3) matrix
     in python. We'll flatten row-major for each node.
     """
     coords = mesh.coordinates()
     nverts = coords.shape[0]
     out = np.zeros((nverts, 9), dtype=float)
-    
+
     for i in range(nverts):
         # Evaluate stress at vertex i => 3x3 matrix
         sigma_3x3 = stress_fun(*coords[i])  # shape (3,3)
         # Flatten in row-major order
         out[i] = np.array(sigma_3x3).flatten()
-    
+
     return out
 
 
-def fea_simulation(L, W, D, NL, NW, ND, elastic_params, density, damping_params, newmark_params,
-                   initial_force=1.0, cutoff_time_factor=1/5, total_time=4.0, num_steps=50, mode='train'):
-
+def fea_simulation(
+    L,
+    W,
+    D,
+    NL,
+    NW,
+    ND,
+    elastic_params,
+    density,
+    damping_params,
+    newmark_params,
+    initial_force=1.0,
+    cutoff_time_factor=1 / 5,
+    total_time=4.0,
+    num_steps=50,
+    mode="train",
+):
     parameters["form_compiler"]["cpp_optimize"] = True
     parameters["form_compiler"]["optimize"] = True
 
@@ -219,13 +243,13 @@ def fea_simulation(L, W, D, NL, NW, ND, elastic_params, density, damping_params,
     alpha_m = Constant(alpha_m_val)
     alpha_f = Constant(alpha_f_val)
     gamma = Constant(0.5 + alpha_f - alpha_m)
-    beta = Constant((gamma + 0.5)**2 / 4.)
+    beta = Constant((gamma + 0.5) ** 2 / 4.0)
 
     # Mesh
-    mesh = BoxMesh(Point(0., 0., 0.), Point(L, W, D), NL, NW, ND)
+    mesh = BoxMesh(Point(0.0, 0.0, 0.0), Point(L, W, D), NL, NW, ND)
 
     def left(x, on_boundary):
-        return near(x[0], 0.) and on_boundary
+        return near(x[0], 0.0) and on_boundary
 
     def right(x, on_boundary):
         return near(x[0], L) and on_boundary
@@ -263,8 +287,11 @@ def fea_simulation(L, W, D, NL, NW, ND, elastic_params, density, damping_params,
     # Force expression (ramp up in y-direction)
     p0 = initial_force
     cutoff_Tc = T * cutoff_time_factor
-    p = Expression(("0", "t <= tc ? p0 * t / tc : 0", "0"), t=0, tc=cutoff_Tc, p0=p0, degree=0)
-    #Expression(("0", "0","t <= tc ? p0 * t / tc : 0"), t=0, tc=cutoff_Tc, p0=p0, degree=0)
+    p = Expression(
+        ("0", "t <= tc ? p0 * t / tc : 0", "0"), t=0, tc=cutoff_Tc, p0=p0, degree=0
+    )
+
+    # Expression(("0", "0","t <= tc ? p0 * t / tc : 0"), t=0, tc=cutoff_Tc, p0=p0, degree=0)
     # PDE forms
     def sigma(r):
         return 2.0 * mu * sym(grad(r)) + lmbda * tr(sym(grad(r))) * Identity(len(r))
@@ -276,10 +303,10 @@ def fea_simulation(L, W, D, NL, NW, ND, elastic_params, density, damping_params,
         return inner(sigma(uA), sym(grad(uB))) * dx
 
     def c(uA, uB):
-        return eta_m*m(uA,uB) + eta_k*k(uA,uB)
+        return eta_m * m(uA, uB) + eta_k * k(uA, uB)
 
     def Wext(uA):
-        return dot(uA, p)*dss(3)
+        return dot(uA, p) * dss(3)
 
     def update_a(uNEW, uOLD, vOLD, aOLD, ufl=True):
         if ufl:
@@ -288,7 +315,9 @@ def fea_simulation(L, W, D, NL, NW, ND, elastic_params, density, damping_params,
         else:
             dt_ = float(dt)
             beta_ = float(beta)
-        return (uNEW - uOLD - dt_ * vOLD) / (beta_ * dt_**2) - (1 - 2 * beta_) / (2 * beta_) * aOLD
+        return (uNEW - uOLD - dt_ * vOLD) / (beta_ * dt_**2) - (1 - 2 * beta_) / (
+            2 * beta_
+        ) * aOLD
 
     def update_v(aNEW, uOLD, vOLD, aOLD, ufl=True):
         if ufl:
@@ -314,10 +343,15 @@ def fea_simulation(L, W, D, NL, NW, ND, elastic_params, density, damping_params,
 
     a_new = update_a(du, u_old, v_old, a_old, ufl=True)
     v_new = update_v(a_new, u_old, v_old, a_old, ufl=True)
-    res = m(avg(a_old, a_new, alpha_m), u_) + c(avg(v_old, v_new, alpha_f), u_) \
-          + k(avg(u_old, du, alpha_f), u_) - Wext(u_)
+    res = (
+        m(avg(a_old, a_new, alpha_m), u_)
+        + c(avg(v_old, v_new, alpha_f), u_)
+        + k(avg(u_old, du, alpha_f), u_)
+        - Wext(u_)
+    )
 
     from ufl import lhs, rhs
+
     a_form = lhs(res)
     L_form = rhs(res)
 
@@ -351,29 +385,24 @@ def fea_simulation(L, W, D, NL, NW, ND, elastic_params, density, damping_params,
             return
 
     # corners
-    corners = [
-        (0.0, 0.0, 0.0),
-        (0.0, W,   0.0),
-        (0.0, 0.0, D),
-        (0.0, W,   D)
-    ]
-    u_corners = np.zeros((Nsteps+1, len(corners)))
+    corners = [(0.0, 0.0, 0.0), (0.0, W, 0.0), (0.0, 0.0, D), (0.0, W, D)]
+    u_corners = np.zeros((Nsteps + 1, len(corners)))
 
     lst_graph_tstep = []
 
-    V_p = VectorFunctionSpace(mesh, 'CG', 1)
+    V_p = VectorFunctionSpace(mesh, "CG", 1)
     V_stress_nodes = TensorFunctionSpace(mesh, "CG", 1)
 
-    p_function = Function(V_p)  
+    p_function = Function(V_p)
     initial_coordinates = mesh.coordinates()
 
     for i in range(Nsteps):
-        dt_i = time[i+1] - time[i]
-        t_now = time[i+1]
+        dt_i = time[i + 1] - time[i]
+        t_now = time[i + 1]
         print("Time: ", t_now)
 
         # Evaluate force expression at t_{n+1 - alpha_f}
-        p.t = t_now - float(alpha_f)*dt_i
+        p.t = t_now - float(alpha_f) * dt_i
 
         # PDE solve
         res_assembled = assemble(L_form)
@@ -396,7 +425,7 @@ def fea_simulation(L, W, D, NL, NW, ND, elastic_params, density, damping_params,
         node_force_t = torch.tensor(force_vertex_array, dtype=torch.float)
 
         # Evaluate displacement at each vertex
-        disp_evaluated = evaluate_u_at_vertices(u, mesh)  
+        disp_evaluated = evaluate_u_at_vertices(u, mesh)
         deformed_coordinates = initial_coordinates + disp_evaluated
         pos_t = torch.tensor(deformed_coordinates, dtype=torch.float)
 
@@ -415,11 +444,11 @@ def fea_simulation(L, W, D, NL, NW, ND, elastic_params, density, damping_params,
             x_vel_t=vel_t,
             y_acc_t=acc_t,
             y_sig_t=sig_t,
-            x_node_force=node_force_t,   # <-- Vertex-based force
+            x_node_force=node_force_t,  # <-- Vertex-based force
             x_bc=node_scalar,
             y_node_lumped_masses=torch.tensor(lumped_masses_nodes, dtype=torch.float),
             x_element_connectivity=mesh_connectivity,
-            time=torch.tensor([t_now], dtype=torch.float)
+            time=torch.tensor([t_now], dtype=torch.float),
         )
         lst_graph_tstep.append(graph)
 
@@ -427,80 +456,88 @@ def fea_simulation(L, W, D, NL, NW, ND, elastic_params, density, damping_params,
 
         # Tip displacement
         if MPI.comm_world.size == 1:
-            u_tip[i+1] = u(L, W, 0.)[1]
+            u_tip[i + 1] = u(L, W, 0.0)[1]
             for j, cpt in enumerate(corners):
-                u_corners[i+1, j] = u(*cpt)[1]
+                u_corners[i + 1, j] = u(*cpt)[1]
 
         # energies
-        E_elas = assemble(0.5*k(u_old, u_old))
-        E_kin = assemble(0.5*m(v_old, v_old))
-        E_damp += dt_i*assemble(c(v_old, v_old))
+        E_elas = assemble(0.5 * k(u_old, u_old))
+        E_kin = assemble(0.5 * m(v_old, v_old))
+        E_damp += dt_i * assemble(c(v_old, v_old))
         E_tot = E_elas + E_kin + E_damp
-        energies[i+1, :] = np.array([E_elas, E_kin, E_damp, E_tot])
+        energies[i + 1, :] = np.array([E_elas, E_kin, E_damp, E_tot])
 
-    simulation_name = (f'L{L}_W{W}_D{D}_NL{NL}_NW{NW}_ND{ND}_'
-                       f'E{E}_nu{nu}_rho{density}_'
-                       f'em{eta_m_val}_ek{eta_k_val}_Pi{initial_force}_'
-                       f'T{total_time}_Tc{cutoff_time_factor*total_time}_Nsteps{num_steps}')
+    simulation_name = (
+        f"L{L}_W{W}_D{D}_NL{NL}_NW{NW}_ND{ND}_"
+        f"E{E}_nu{nu}_rho{density}_"
+        f"em{eta_m_val}_ek{eta_k_val}_Pi{initial_force}_"
+        f"T{total_time}_Tc{cutoff_time_factor * total_time}_Nsteps{num_steps}"
+    )
 
-    save_path = './Results'
+    save_path = "./Results"
     if not os.path.exists(save_path):
         os.makedirs(save_path)
 
-    save_path_graph = os.path.join(save_path, mode, 'graphs')
-    save_path_plot_check = os.path.join(save_path, mode, 'plot_check')
+    save_path_graph = os.path.join(save_path, mode, "graphs")
+    save_path_plot_check = os.path.join(save_path, mode, "plot_check")
     os.makedirs(save_path_graph, exist_ok=True)
     os.makedirs(save_path_plot_check, exist_ok=True)
 
     # Define file paths for plot and graph data using the simulation_name
-    plot_file_path = os.path.join(save_path_plot_check, f'plot_{simulation_name}.png')
-    graph_file_path = os.path.join(save_path_graph, f'graphs{simulation_name}.pt')  # Assuming graph data is saved in .pt format
+    plot_file_path = os.path.join(save_path_plot_check, f"plot_{simulation_name}.png")
+    graph_file_path = os.path.join(
+        save_path_graph, f"graphs{simulation_name}.pt"
+    )  # Assuming graph data is saved in .pt format
 
     # Call the plot_check function and save the plot with the simulation name
     plot_check(time, u_tip, energies, plot_file_path)
 
     # Save the graphs using the simulation name
     save_graphs(lst_graph_tstep, graph_file_path)
-    return lst_graph_tstep, save_path_graph,simulation_name
+    return lst_graph_tstep, save_path_graph, simulation_name
+
 
 def compute_von_mises_3d(stress_9):
-    sxx = stress_9[:,0]
-    sxy = stress_9[:,1]
-    sxz = stress_9[:,2]
-    syx = stress_9[:,3]
-    syy = stress_9[:,4]
-    syz = stress_9[:,5]
-    szx = stress_9[:,6]
-    szy = stress_9[:,7]
-    szz = stress_9[:,8]
+    sxx = stress_9[:, 0]
+    sxy = stress_9[:, 1]
+    sxz = stress_9[:, 2]
+    syx = stress_9[:, 3]
+    syy = stress_9[:, 4]
+    syz = stress_9[:, 5]
+    szx = stress_9[:, 6]
+    szy = stress_9[:, 7]
+    szz = stress_9[:, 8]
     vm = 0.5 * (
-        (sxx - syy)**2 +
-        (syy - szz)**2 +
-        (szz - sxx)**2 +
-        6.0 * (sxy**2 + syz**2 + sxz**2)
+        (sxx - syy) ** 2
+        + (syy - szz) ** 2
+        + (szz - sxx) ** 2
+        + 6.0 * (sxy**2 + syz**2 + sxz**2)
     )
     return np.sqrt(vm)
+
 
 def find_boundary_triangles(tetra_connectivity):
     """
     tetra_connectivity: (num_tetra, 4) array of node indices (integers)
-    
+
     Returns boundary_triangles: (num_faces, 3) array of node indices
     that appear exactly once among all tetra faces => "outside" faces.
     """
     from collections import defaultdict
+
     face_count = defaultdict(int)
     for tet in tetra_connectivity:
         faces = [
             tuple(sorted([tet[0], tet[1], tet[2]])),
             tuple(sorted([tet[0], tet[1], tet[3]])),
             tuple(sorted([tet[0], tet[2], tet[3]])),
-            tuple(sorted([tet[1], tet[2], tet[3]]))
+            tuple(sorted([tet[1], tet[2], tet[3]])),
         ]
         for f in faces:
             face_count[f] += 1
     boundary_faces = [list(face) for face, count in face_count.items() if count == 1]
     return np.array(boundary_faces, dtype=int)
+
 
 def make_beam_gif(lst_graphs, L, W, D, out_gif, fps=4):
     """
@@ -534,7 +571,7 @@ def make_beam_gif(lst_graphs, L, W, D, out_gif, fps=4):
     z_min, z_max = np.min(all_coords[:, 2]), np.max(all_coords[:, 2])
 
     # Compute global von Mises stress range
-    vm_min, vm_max = float('inf'), 0.0
+    vm_min, vm_max = float("inf"), 0.0
     for g in lst_graphs:
         stress_9 = g.y_sig_t.cpu().numpy()
         vm = compute_von_mises_3d(stress_9)
@@ -542,9 +579,9 @@ def make_beam_gif(lst_graphs, L, W, D, out_gif, fps=4):
         vm_max = max(vm_max, np.max(vm))
 
     for i, graph in enumerate(lst_graphs):
-        print(f"Rendering frame {i}/{len(lst_graphs)-1}")
+        print(f"Rendering frame {i}/{len(lst_graphs) - 1}")
 
-        coords = graph.x.cpu().numpy()      # shape (n,3)
+        coords = graph.x.cpu().numpy()  # shape (n,3)
         stress_9 = graph.y_sig_t.cpu().numpy()  # shape (n,9)
         vm = compute_von_mises_3d(stress_9)
 
@@ -558,7 +595,7 @@ def make_beam_gif(lst_graphs, L, W, D, out_gif, fps=4):
         face_values = np.array(face_values)
 
         fig = plt.figure(figsize=(12, 8))
-        ax = fig.add_subplot(111, projection='3d')
+        ax = fig.add_subplot(111, projection="3d")
 
         # Color map
         cmap = plt.cm.jet
@@ -567,7 +604,7 @@ def make_beam_gif(lst_graphs, L, W, D, out_gif, fps=4):
 
         polycoll = Poly3DCollection(polys)
         polycoll.set_facecolors(face_colors)
-        polycoll.set_edgecolor('none')
+        polycoll.set_edgecolor("none")
         ax.add_collection3d(polycoll)
 
         # Set axis limits and aspect ratio
@@ -576,9 +613,9 @@ def make_beam_gif(lst_graphs, L, W, D, out_gif, fps=4):
         ax.set_zlim(z_min, z_max)
         ax.set_box_aspect((x_max - x_min, y_max - y_min, z_max - z_min))
 
-        ax.set_xlabel('X')
-        ax.set_ylabel('Y')
-        ax.set_zlabel('Z')
+        ax.set_xlabel("X")
+        ax.set_ylabel("Y")
+        ax.set_zlabel("Z")
 
         # Viewpoint
         ax.view_init(elev=30, azim=45)
@@ -608,37 +645,83 @@ def make_beam_gif(lst_graphs, L, W, D, out_gif, fps=4):
 
 if __name__ == "__main__":
     # Create an argument parser
-    parser = argparse.ArgumentParser(description='FEA Simulation Parameters')
+    parser = argparse.ArgumentParser(description="FEA Simulation Parameters")
 
     # Geometrical and discretization parameters
-    parser.add_argument('--L', type=float, default=1.0, help='Length of the beam (default: 1.0)')
-    parser.add_argument('--W', type=float, default=0.1, help='Width of the beam (default: 0.1)')
-    parser.add_argument('--D', type=float, default=0.04, help='Depth of the beam (default: 0.04)')
-    parser.add_argument('--NL', type=int, default=8, help='Number of elements along length (default: 8)')
-    parser.add_argument('--NW', type=int, default=2, help='Number of elements along width (default: 2)')
-    parser.add_argument('--ND', type=int, default=2, help='Number of elements along depth (default: 2)')
+    parser.add_argument(
+        "--L", type=float, default=1.0, help="Length of the beam (default: 1.0)"
+    )
+    parser.add_argument(
+        "--W", type=float, default=0.1, help="Width of the beam (default: 0.1)"
+    )
+    parser.add_argument(
+        "--D", type=float, default=0.04, help="Depth of the beam (default: 0.04)"
+    )
+    parser.add_argument(
+        "--NL", type=int, default=8, help="Number of elements along length (default: 8)"
+    )
+    parser.add_argument(
+        "--NW", type=int, default=2, help="Number of elements along width (default: 2)"
+    )
+    parser.add_argument(
+        "--ND", type=int, default=2, help="Number of elements along depth (default: 2)"
+    )
 
     # Material properties
-    parser.add_argument('--E', type=float, default=1000.0, help="Young's modulus (default: 1000.0)")
-    parser.add_argument('--nu', type=float, default=0.3, help="Poisson's ratio (default: 0.3)")
-    parser.add_argument('--rho', type=float, default=1.0, help='Density (default: 1.0)')
+    parser.add_argument(
+        "--E", type=float, default=1000.0, help="Young's modulus (default: 1000.0)"
+    )
+    parser.add_argument(
+        "--nu", type=float, default=0.3, help="Poisson's ratio (default: 0.3)"
+    )
+    parser.add_argument("--rho", type=float, default=1.0, help="Density (default: 1.0)")
 
     # Damping parameters
-    parser.add_argument('--eta_m', type=float, default=0.01, help='Mass proportional damping (default: 0.01)')
-    parser.add_argument('--eta_k', type=float, default=0.01, help='Stiffness proportional damping (default: 0.01)')
+    parser.add_argument(
+        "--eta_m",
+        type=float,
+        default=0.01,
+        help="Mass proportional damping (default: 0.01)",
+    )
+    parser.add_argument(
+        "--eta_k",
+        type=float,
+        default=0.01,
+        help="Stiffness proportional damping (default: 0.01)",
+    )
 
     # Newmark method parameters
-    parser.add_argument('--alpha_m', type=float, default=0.0, help='Alpha mass (default: 0.0)')
-    parser.add_argument('--alpha_f', type=float, default=0.0, help='Alpha force (default: 0.0)')
+    parser.add_argument(
+        "--alpha_m", type=float, default=0.0, help="Alpha mass (default: 0.0)"
+    )
+    parser.add_argument(
+        "--alpha_f", type=float, default=0.0, help="Alpha force (default: 0.0)"
+    )
 
     # Simulation parameters
-    parser.add_argument('--initial_force', type=float, default=1.0, help='Initial force (default: 1.0)')
-    parser.add_argument('--cutoff_time_factor', type=float, default=1/5, help='Cutoff time factor (default: 0.2)')
-    parser.add_argument('--total_time', type=float, default=4.0, help='Total simulation time (default: 4.0)')
-    parser.add_argument('--num_steps', type=int, default=50, help='Number of time steps (default: 50)')
+    parser.add_argument(
+        "--initial_force", type=float, default=1.0, help="Initial force (default: 1.0)"
+    )
+    parser.add_argument(
+        "--cutoff_time_factor",
+        type=float,
+        default=1 / 5,
+        help="Cutoff time factor (default: 0.2)",
+    )
+    parser.add_argument(
+        "--total_time",
+        type=float,
+        default=4.0,
+        help="Total simulation time (default: 4.0)",
+    )
+    parser.add_argument(
+        "--num_steps", type=int, default=50, help="Number of time steps (default: 50)"
+    )
 
-    #flag
-    parser.add_argument('--mode', type=str, default='train', help='subfolder name e.g. test,train')
+    # flag
+    parser.add_argument(
+        "--mode", type=str, default="train", help="subfolder name e.g. test,train"
+    )
 
     # Parse the arguments
     args = parser.parse_args()
@@ -670,11 +753,24 @@ if __name__ == "__main__":
     newmark_params = (alpha_m, alpha_f)
 
     # Run simulation
-    lst_graphs,graph_save_path,simulation_name = fea_simulation(L, W, D, NL, NW, ND, elastic_params, density, damping_params, newmark_params,
-                           initial_force, cutoff_time_factor, total_time, num_steps,mode)
-    
-    out_gif = os.path.join(graph_save_path,'BEAM_'+simulation_name+'.gif')
+    lst_graphs, graph_save_path, simulation_name = fea_simulation(
+        L,
+        W,
+        D,
+        NL,
+        NW,
+        ND,
+        elastic_params,
+        density,
+        damping_params,
+        newmark_params,
+        initial_force,
+        cutoff_time_factor,
+        total_time,
+        num_steps,
+        mode,
+    )
+
+    out_gif = os.path.join(graph_save_path, "BEAM_" + simulation_name + ".gif")
 
     make_beam_gif(lst_graphs, L, W, D, out_gif, fps=4)
-
-

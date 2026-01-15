@@ -6,11 +6,11 @@ def run_simulations():
     # Default parameters
     default_params = {
         "L": 1.0,
-        "W": 0.5,
-        "D": 0.5,
-        "NL": 16,
-        "NW": 8,
-        "ND": 8,
+        "W": 0.1,
+        "D": 0.1,
+        "NL": 4,
+        "NW": 2,
+        "ND": 2,
         "E": 1000.0,
         "nu": 0.3,
         "rho": 1.0,
@@ -24,10 +24,11 @@ def run_simulations():
     }
 
     # For 'train' dataset
-    initial_force_values = [10]
-    cutoff_time_factors = [0.1]
+    initial_force_values = [1.0, 1.5, 2.0, 1.0, 1.5, 2.0]
+    cutoff_time_factors = [0.1, 0.1, 0.1, 0.2, 0.2, 0.2]
 
-    for initial_force in initial_force_values:
+    for idx, initial_force in enumerate(initial_force_values):
+        print(f"\n=== Simulation Set {idx + 1} ===")
         for cutoff_time_factor in cutoff_time_factors:
             params = default_params.copy()
             params.update(
@@ -42,52 +43,6 @@ def run_simulations():
                 f"\nRunning train simulation with initial_force={initial_force}, cutoff_time_factor={cutoff_time_factor}"
             )
             run_command(command)
-
-    # For 'test_extr_force'
-    params = default_params.copy()
-    params.update(
-        {"initial_force": 1.5, "cutoff_time_factor": 0.5, "mode": "test_extr_force"}
-    )
-    command = build_command(params)
-    print(
-        f"\nRunning test_extr_force simulation with initial_force=1.5, cutoff_time_factor=0.5"
-    )
-    run_command(command)
-
-    # For 'test_extr_geo'
-    params = default_params.copy()
-    params.update(
-        {
-            "L": 2.0,
-            "W": 0.5,
-            "D": 0.5,
-            "NL": 64,
-            "NW": 8,
-            "ND": 8,
-            "initial_force": 1.0,
-            "cutoff_time_factor": 0.2,
-            "mode": "test_extr_geo",
-        }
-    )
-    command = build_command(params)
-    print(f"\nRunning test_extr_geo simulation with L=1.5, W=0.2, D=0.2")
-    run_command(command)
-
-    # For 'test_extr_desc'
-    params = default_params.copy()
-    params.update(
-        {
-            "NL": 16,
-            "NW": 4,
-            "ND": 4,
-            "initial_force": 1.0,
-            "cutoff_time_factor": 0.2,
-            "mode": "test_extr_desc",
-        }
-    )
-    command = build_command(params)
-    print(f"\nRunning test_extr_desc simulation with NL=16, NW=4, ND=4")
-    run_command(command)
 
 
 def build_command(params):

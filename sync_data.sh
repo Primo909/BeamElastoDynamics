@@ -1,0 +1,1 @@
+rsync -avz --progress ./Results epfl:/mnt/imos/scratch/imos-students/ksteiner/BeamElastoDynamics/

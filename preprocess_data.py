@@ -139,7 +139,7 @@ def preprocess_data(data_dir: Path, split: str, noise_scale: float = 0.0, dt=0.0
             torch.save(graphs, file_path)
     elif split == "test" or split == "val":
         # only load one trajector
-        data_dir = data_dir / split / "graphs"
+        data_dir = data_dir / "train" / "graphs"
         filenames = list(data_dir.glob("*.pt"))
         filename = filenames[0]
         print(f"Processing file: {filename}")

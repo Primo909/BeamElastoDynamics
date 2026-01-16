@@ -1,30 +1,14 @@
 import os
 from pathlib import Path
-import pandas as pd
-import torch
-import torch.nn as nn
+
 import numpy as np
-import matplotlib.pyplot as plt
-from torch_geometric.data import Data, Batch
-from torch_geometric.loader import DataLoader
-from torch_geometric.nn import MessagePassing
-
-from torch_geometric.data import Dataset
-from torch_geometric.loader import DataLoader
-from torch.nn import Sequential, Linear, ReLU, LayerNorm
+import torch
 import torch.nn.functional as F
-from torch_geometric.utils import to_networkx, from_networkx
-import networkx as nx
-import imageio
-from tqdm import tqdm
-import random
-import pickle
-import shutil
-from mpl_toolkits.mplot3d.art3d import Poly3DCollection
-
-from in_memory_dataset import InMemoryTimeStepDataset
-from models.vinay_mgn import MeshGraphNet
+from torch_geometric.data import Data
 from typing_extensions import Literal
+
+from preprocess_data import Stats
+from rollout_utils import do_rollout
 
 
 class Trainer:
@@ -55,7 +39,7 @@ class Trainer:
             self.loss_fn = F.l1_loss
         else:
             print(f"Unsupported loss function: {loss_type}!")
-            print(f"Falling back to MSE loss.")
+            print("Falling back to MSE loss.")
             self.loss_fn = F.mse_loss
         # Training and test history
         self.train_history = []
@@ -93,12 +77,36 @@ class Trainer:
         self.loss = np.mean(self.epoch_losses)
         self.epoch_losses = []
 
-    def test(self, test_loader, gen_roll_out=False, experiment_name="Val"):
-        self.model.eval()  # Set model to evaluation mode
+    def test(
+        self,
+        test_loader,
+        node_stats: Stats,
+        edge_stats: Stats,
+        target_stats: Stats,
+        dt: float,
+    ):
+        self.model.eval()  # Set model to evaluation modes
+
+        # Perform model rollout testing
+        error_x, error_v, error_stress, true_rollout, pred_rollout = do_rollout(
+            model=self.model,
+            test_loader=test_loader,
+            device=self.device,
+            node_stats=node_stats,
+            edge_stats=edge_stats,
+            target_stats=target_stats,
+            dt=dt,
+        )
+
+        # Compute generalization errors
+        self.gen_loss_pos = np.sum(error_x) / len(error_x)
+        self.gen_loss_vel = np.sum(error_v) / len(error_v)
+        self.gen_loss_stress = np.sum(error_stress) / len(error_stress)
+
         # Store overall test loss history
-        # self.gen_test_history.append(
-        #     self.gen_loss_pos + self.gen_loss_vel + self.gen_loss_stress
-        # )
+        self.gen_test_history.append(
+            self.gen_loss_pos + self.gen_loss_vel + self.gen_loss_stress
+        )
 
     def save_model(self):
         self.model_dir.mkdir(parents=True, exist_ok=True)

@@ -2,6 +2,8 @@ Results/
 saved_models/
 *.gif
 .DS_Store
+.vscode/
+*.pt
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

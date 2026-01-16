@@ -1,31 +1,11 @@
-import os
-import pandas as pd
-import torch
-import torch.nn as nn
-import numpy as np
-import matplotlib.pyplot as plt
-from torch_geometric.data import Data, Batch
-from torch_geometric.loader import DataLoader
-from torch_geometric.nn import MessagePassing
-
-from torch_geometric.data import Dataset
-from torch_geometric.loader import DataLoader
-from torch.nn import Sequential, Linear, ReLU, LayerNorm
-import torch.nn.functional as F
-from torch_geometric.utils import to_networkx, from_networkx
-import networkx as nx
-import imageio
-from tqdm.notebook import tqdm
-import random
-import pickle
-import shutil
-
 ### feature engineeringo
 import json
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from pathlib import Path
+
 import torch
-from torch_geometric.data import Data, Batch
+from torch_geometric.data import Batch, Data
+
 from beam_fea_solver import compute_von_mises_3d
 
 
@@ -155,6 +135,7 @@ if __name__ == "__main__":
         # only load one trajectory
         filenames = list(data_dir.glob("*.pt"))
         filename = filenames[0]
+        print(f"Processing file: {filename}")
         dataloader = torch.load(filename, weights_only=False)
         graphs = []
         for data in dataloader:
@@ -164,6 +145,10 @@ if __name__ == "__main__":
         len_traj = len(dataloader)
         x_next = whole_trajectory_batch.x.reshape(len_traj, -1, 3)[1:]
         v_next = whole_trajectory_batch.x_vel_t.reshape(len_traj, -1, 3)[1:]
+        node_force_next = whole_trajectory_batch.x_node_force.reshape(len_traj, -1, 3)[
+            1:
+        ]
+        print(x_next.shape, v_next.shape, node_force_next.shape)
 
         with open("./Results/train/stats/stats.json", "r") as f:
             stats_dict = json.load(f)
@@ -172,31 +157,47 @@ if __name__ == "__main__":
         target_stats = Stats.from_dict(stats_dict["target"])
 
         test_graphs = []
-        for graph in graphs:
+        for i, graph in enumerate(graphs):
+            if i > 48:
+                break
             boundary_condition = graph.x_bc  # 1 fixed, 0 free
             node_force = graph.x_node_force  # external force on node
             x = graph.x
 
-            categorical_node_features.append(boundary_condition)
-            valued_node_features.append(
-                torch.concat([x, graph.x_vel_t, node_force], dim=1)
-            )
-            print(graph.time)
-            test_graphs.append(
-                Data(
-                    edge_index=graph.edge_index,
-                    t=graph.time,
-                    y_acc_t=graph.y_acc_t,
-                    y_pos_t=graph.x,
-                    y_vel_t=graph.x_vel_t,
-                    node_force=node_force,
-                )
-            )
+            valued_node_features = torch.concat([x, graph.x_vel_t, node_force], dim=1)
 
             src, dst = graph.edge_index
             xij = x[dst] - x[src]
             xij_norm = torch.norm(xij, dim=1).unsqueeze(1)
-            edge_features.append(torch.concat([xij, xij_norm], dim=1))
+            edge_features = torch.concat([xij, xij_norm], dim=1)
 
             von_mises = compute_von_mises_3d(graph.y_sig_t).unsqueeze(1)
-            targets.append(torch.concat([graph.y_acc_t, von_mises], dim=1))
+
+            _x = torch.concat(
+                [boundary_condition, normalize(valued_node_features, node_stats)], dim=1
+            )
+            _edge_attr = normalize(edge_features, edge_stats)
+
+            test_graphs.append(
+                Data(
+                    x=_x,
+                    edge_attr=_edge_attr,
+                    edge_index=graph.edge_index,
+                    # additional eval info
+                    t=graph.time,
+                    x_pos_t=graph.x,
+                    x_vel_t=graph.x_vel_t,
+                    node_force=node_force,
+                    node_force_next=node_force_next[i],
+                    x_next=x_next[i],
+                    v_next=v_next[i],
+                    y_acc_t=graph.y_acc_t,
+                    y_von_mises=von_mises,
+                    x_element_connectivity=graph.x_element_connectivity,
+                )
+            )
+        save_dir = Path("dataset/beam/test")
+        save_dir.mkdir(parents=True, exist_ok=True)
+        file_path = save_dir / "graph_00.pt"
+        torch.save(test_graphs, file_path)
+        print(f"Saved test graphs to {file_path}")

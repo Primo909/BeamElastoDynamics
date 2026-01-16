@@ -1,5 +1,6 @@
 import subprocess
 import sys
+from itertools import product
 
 
 def run_simulations():
@@ -8,9 +9,9 @@ def run_simulations():
         "L": 1.0,
         "W": 0.1,
         "D": 0.1,
-        "NL": 4,
-        "NW": 2,
-        "ND": 2,
+        "NL": 8,
+        "NW": 4,
+        "ND": 4,
         "E": 1000.0,
         "nu": 0.3,
         "rho": 1.0,
@@ -21,28 +22,34 @@ def run_simulations():
         "total_time": 4.0,
         "cutoff_time_factor": 0.2,
         "num_steps": 50,
+        "initial_force_x": 0.0,
+        "initial_force_z": 0.0,
     }
 
     # For 'train' dataset
-    initial_force_values = [1.0, 1.5, 2.0, 1.0, 1.5, 2.0]
-    cutoff_time_factors = [0.1, 0.1, 0.1, 0.2, 0.2, 0.2]
+    forces = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5]
+    lengths = [0.5, 0.75, 1.0]
+    widths = [0.1, 0.14, 0.06]
 
-    for idx, initial_force in enumerate(initial_force_values):
+    param_combinations = list(product(forces, lengths, widths))
+    print(f"Total simulations to run: {len(param_combinations)}")
+    for idx, (initial_force_y, L, W) in enumerate(param_combinations):
         print(f"\n=== Simulation Set {idx + 1} ===")
-        for cutoff_time_factor in cutoff_time_factors:
-            params = default_params.copy()
-            params.update(
-                {
-                    "initial_force": initial_force,
-                    "cutoff_time_factor": cutoff_time_factor,
-                    "mode": "train",
-                }
-            )
-            command = build_command(params)
-            print(
-                f"\nRunning train simulation with initial_force={initial_force}, cutoff_time_factor={cutoff_time_factor}"
-            )
-            run_command(command)
+        params = default_params.copy()
+        params.update(
+            {
+                "initial_force_y": initial_force_y,
+                "L": L,
+                "W": W,
+                "mode": "train",
+            }
+        )
+
+        command = build_command(params)
+        print(
+            f"\nRunning train simulation with initial_force={initial_force_y}, L={L}, W={W}"
+        )
+        run_command(command)
 
 
 def build_command(params):

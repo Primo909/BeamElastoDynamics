@@ -48,11 +48,11 @@ def denormalize(tensor: torch.Tensor, stats: Stats, eps: float = 1e-8) -> torch.
     return tensor * (stats.std + eps) + stats.mean
 
 
-if __name__ == "__main__":
-    data_dir = Path("Results/train/graphs")
-    split = "test"
-
+def preprocess_data(data_dir: Path, split: str, noise_scale: float = 0.0, dt=0.08):
+    SEED = 42
+    torch.manual_seed(SEED)
     if split == "train":
+        data_dir = data_dir / "train" / "graphs"
         filenames = list(data_dir.glob("*.pt"))
 
         train_graphs = []
@@ -67,24 +67,30 @@ if __name__ == "__main__":
             for data in dataloader:
                 graph = data.to("cpu")
                 graphs.append(graph)
-            for graph in graphs:
+            whole_trajectory_batch = Batch.from_data_list(graphs)
+            len_traj = len(graphs)
+            x_next = whole_trajectory_batch.x.reshape(len_traj, -1, 3)[1:]
+            for i, graph in enumerate(graphs):
+                if i > 48:
+                    break
                 traj_idx.append(idx)
                 boundary_condition = graph.x_bc  # 1 fixed, 0 free
                 node_force = graph.x_node_force  # external force on node
                 x = graph.x
+                noise = noise_scale * torch.randn_like(x)
+
+                x = x + noise
+                v = (x_next[i] - x - noise) / dt
 
                 categorical_node_features.append(boundary_condition)
-                valued_node_features.append(
-                    torch.concat([x, graph.x_vel_t, node_force], dim=1)
-                )
-                print(graph.time)
+                valued_node_features.append(torch.concat([x, v, node_force], dim=1))
                 train_graphs.append(
                     Data(
                         edge_index=graph.edge_index,
                         t=graph.time,
                         y_acc_t=graph.y_acc_t,
-                        y_pos_t=graph.x,
-                        y_vel_t=graph.x_vel_t,
+                        y_pos_t=x,
+                        y_vel_t=v,
                     )
                 )
 
@@ -131,8 +137,9 @@ if __name__ == "__main__":
             print(f"Length of trajectory {traj}: {len(graphs)}")
             file_path = save_dir / f"graph_{traj:02d}.pt"
             torch.save(graphs, file_path)
-    elif split == "test":
-        # only load one trajectory
+    elif split == "test" or split == "val":
+        # only load one trajector
+        data_dir = data_dir / split / "graphs"
         filenames = list(data_dir.glob("*.pt"))
         filename = filenames[0]
         print(f"Processing file: {filename}")
@@ -163,8 +170,11 @@ if __name__ == "__main__":
             boundary_condition = graph.x_bc  # 1 fixed, 0 free
             node_force = graph.x_node_force  # external force on node
             x = graph.x
+            # no noise added during test
+            x = x
+            v = (x_next[i] - x) / dt
 
-            valued_node_features = torch.concat([x, graph.x_vel_t, node_force], dim=1)
+            valued_node_features = torch.concat([x, v, node_force], dim=1)
 
             src, dst = graph.edge_index
             xij = x[dst] - x[src]
@@ -186,7 +196,7 @@ if __name__ == "__main__":
                     # additional eval info
                     t=graph.time,
                     x_pos_t=graph.x,
-                    x_vel_t=graph.x_vel_t,
+                    x_vel_t=v,
                     node_force=node_force,
                     node_force_next=node_force_next[i],
                     x_next=x_next[i],
@@ -196,8 +206,14 @@ if __name__ == "__main__":
                     x_element_connectivity=graph.x_element_connectivity,
                 )
             )
-        save_dir = Path("dataset/beam/test")
+        save_dir = Path(f"dataset/beam/{split}")
         save_dir.mkdir(parents=True, exist_ok=True)
         file_path = save_dir / "graph_00.pt"
         torch.save(test_graphs, file_path)
         print(f"Saved test graphs to {file_path}")
+
+
+if __name__ == "__main__":
+    data_dir = Path("Results/train/graphs")
+    split = "test"
+    preprocess_data(data_dir, split)

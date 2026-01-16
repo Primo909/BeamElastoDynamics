@@ -1,5 +1,7 @@
 import os
 import shutil
+import time
+from pathlib import Path
 
 import imageio
 import matplotlib.pyplot as plt
@@ -53,7 +55,8 @@ def make_beam_comparison_gif(
         "Mismatch in predicted and ground truth frames."
     )
 
-    temp_dir = "temp_frames"
+    time_start = time.time()
+    temp_dir = "temp_frames_" + str(time_start)
     if os.path.exists(temp_dir):
         shutil.rmtree(temp_dir)
     os.makedirs(temp_dir, exist_ok=True)
@@ -151,6 +154,8 @@ def make_beam_comparison_gif(
         # cb.set_label("von Mises Stress")
 
         frame_path = os.path.join(temp_dir, f"frame_{i:03d}.png")
+        frame_path = Path(frame_path)
+        frame_path.parent.mkdir(parents=True, exist_ok=True)
         plt.tight_layout(rect=[0, 0, 0.9, 1])
         plt.savefig(frame_path, dpi=100)
         plt.close(fig)

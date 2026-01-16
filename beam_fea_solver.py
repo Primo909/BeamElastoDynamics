@@ -1,14 +1,15 @@
-from dolfin import *
-import numpy as np
+import argparse
+import os
+
+import imageio
 import matplotlib.pyplot as plt
-from fenics import project
+import numpy as np
 import torch
+from dolfin import *
+from fenics import project
+from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 from torch_geometric.data import Data
 from torch_geometric.loader import DataLoader
-import os
-import argparse
-from mpl_toolkits.mplot3d.art3d import Poly3DCollection
-import imageio
 
 
 def extract_edges(mesh):
@@ -30,8 +31,8 @@ def extract_node_masses(u_, du, rho):
     Compute node-wise lumped masses in 3D, re-ordered
     to match the same vertex indexing as mesh.coordinates().
     """
-    from dolfin import dof_to_vertex_map
     import numpy as np
+    from dolfin import dof_to_vertex_map
 
     # Get the VectorFunctionSpace from u_
     V = u_.function_space()
@@ -216,7 +217,9 @@ def fea_simulation(
     density,
     damping_params,
     newmark_params,
-    initial_force=1.0,
+    initial_force_x=0.0,
+    initial_force_y=1.0,
+    initial_force_z=0.0,
     cutoff_time_factor=1 / 5,
     total_time=4.0,
     num_steps=50,
@@ -285,10 +288,22 @@ def fea_simulation(
     dt = Constant(T / Nsteps)
 
     # Force expression (ramp up in y-direction)
-    p0 = initial_force
+    p0_x = initial_force_x
+    p0_y = initial_force_y
+    p0_z = initial_force_z
     cutoff_Tc = T * cutoff_time_factor
     p = Expression(
-        ("0", "t <= tc ? p0 * t / tc : 0", "0"), t=0, tc=cutoff_Tc, p0=p0, degree=0
+        (
+            "t <= tc ? p0x * t / tc : 0",
+            "t <= tc ? p0y * t / tc : 0",
+            "t <= tc ? p0z * t / tc : 0",
+        ),
+        t=0,
+        tc=cutoff_Tc,
+        p0x=p0_x,
+        p0y=p0_y,
+        p0z=p0_z,
+        degree=0,
     )
 
     # Expression(("0", "0","t <= tc ? p0 * t / tc : 0"), t=0, tc=cutoff_Tc, p0=p0, degree=0)
@@ -470,7 +485,8 @@ def fea_simulation(
     simulation_name = (
         f"L{L}_W{W}_D{D}_NL{NL}_NW{NW}_ND{ND}_"
         f"E{E}_nu{nu}_rho{density}_"
-        f"em{eta_m_val}_ek{eta_k_val}_Pi{initial_force}_"
+        f"em{eta_m_val}_ek{eta_k_val}"
+        f"_Pix{initial_force_x}_Piy{initial_force_y}_Piz{initial_force_z}_"
         f"T{total_time}_Tc{cutoff_time_factor * total_time}_Nsteps{num_steps}"
     )
 
@@ -700,7 +716,22 @@ if __name__ == "__main__":
 
     # Simulation parameters
     parser.add_argument(
-        "--initial_force", type=float, default=1.0, help="Initial force (default: 1.0)"
+        "--initial_force_y",
+        type=float,
+        default=1.0,
+        help="Initial force (default: 1.0)",
+    )
+    parser.add_argument(
+        "--initial_force_x",
+        type=float,
+        default=0.0,
+        help="Initial force in x direction (default: 0.0)",
+    )
+    parser.add_argument(
+        "--initial_force_z",
+        type=float,
+        default=0.0,
+        help="Initial force in z direction (default: 0.0)",
     )
     parser.add_argument(
         "--cutoff_time_factor",
@@ -740,7 +771,9 @@ if __name__ == "__main__":
     eta_k = args.eta_k
     alpha_m = args.alpha_m
     alpha_f = args.alpha_f
-    initial_force = args.initial_force
+    initial_force_x = args.initial_force_x
+    initial_force_y = args.initial_force_y
+    initial_force_z = args.initial_force_z
     cutoff_time_factor = args.cutoff_time_factor
     total_time = args.total_time
     num_steps = args.num_steps
@@ -764,7 +797,9 @@ if __name__ == "__main__":
         density,
         damping_params,
         newmark_params,
-        initial_force,
+        initial_force_x,
+        initial_force_y,
+        initial_force_z,
         cutoff_time_factor,
         total_time,
         num_steps,

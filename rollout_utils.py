@@ -17,6 +17,8 @@ def do_rollout(
     target_stats: Stats,
     dt: float,
     device: torch.device,
+    skip_first: int = 0,
+    skip_after: int = 99999999,
 ):
     """returns `error_x, error_v, error_stress, true_rollout, pred_rollout`"""
     with torch.no_grad():
@@ -27,7 +29,11 @@ def do_rollout(
         true_rollout = []
         pred_rollout = []
         for t, graph in enumerate(test_loader):
-            if t == 0:
+            if t < skip_first:
+                continue
+            if t > skip_after:
+                break
+            if t == skip_first:
                 input_graph = graph
             pred = model(input_graph.to(device))
 

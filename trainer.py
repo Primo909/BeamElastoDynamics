@@ -108,9 +108,12 @@ class Trainer:
             self.gen_loss_pos + self.gen_loss_vel + self.gen_loss_stress
         )
 
-    def save_model(self):
+    def save_model(self, epoch: int = None):
         self.model_dir.mkdir(parents=True, exist_ok=True)
         # Save model using the generalization loss as part of the filename
-        filename = f"GenLoss_{self.gen_loss_pos:.2f}m_{self.gen_loss_vel:.2f}mps_{self.gen_loss_stress:.2f}Nms2.pth"
+        if epoch is not None:
+            filename = f"Epoch_{epoch}_GenLoss_{self.gen_loss_pos:.2f}m_{self.gen_loss_vel:.2f}mps_{self.gen_loss_stress:.2f}Nms2.pth"
+        else:
+            filename = f"GenLoss_{self.gen_loss_pos:.2f}m_{self.gen_loss_vel:.2f}mps_{self.gen_loss_stress:.2f}Nms2.pth"
         self.path = self.model_dir / filename
         torch.save(self.model.state_dict(), self.path)

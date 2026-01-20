@@ -565,9 +565,8 @@ def make_beam_gif(lst_graphs, L, W, D, out_gif, fps=4):
     fps: frames per second
     """
     import shutil
-    import time
 
-    temp_dir = "temp_frames" + str(int(time.time()))
+    temp_dir = "temp_frames"
     if os.path.exists(temp_dir):
         shutil.rmtree(temp_dir)
     os.makedirs(temp_dir, exist_ok=True)

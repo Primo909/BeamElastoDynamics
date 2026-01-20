@@ -4,7 +4,8 @@ saved_models/
 .DS_Store
 .vscode/
 *.pt
-numpy_2_Results/
+*.env
+
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

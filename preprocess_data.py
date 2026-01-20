@@ -4,9 +4,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import torch
+from torch import Tensor
 from torch_geometric.data import Batch, Data
 
-from beam_fea_solver import compute_von_mises_3d
+from utils import compute_von_mises_3d
 
 
 @dataclass
@@ -47,8 +48,16 @@ def normalize(tensor: torch.Tensor, stats: Stats, eps: float = 1e-8) -> torch.Te
 def denormalize(tensor: torch.Tensor, stats: Stats, eps: float = 1e-8) -> torch.Tensor:
     return tensor * (stats.std + eps) + stats.mean
 
+def calculate_kinematics(x: Tensor, dt: float) -> tuple[Tensor, Tensor]:
+    v0 = torch.zeros(1, x.shape[1], device=x.device, dtype=x.dtype)
+    dx = x[1:] - x[:-1] 
+    v_steps = dx / dt
+    v = torch.cat([v0, v_steps], dim=0)
+    dv = v[1:] - v[:-1]
+    a =  dv / dt
+    return v, a
 
-def preprocess_data(data_dir: Path, split: str, noise_scale: float = 0.0, dt=0.08):
+def preprocess_data(data_dir: Path, split: str, noise_scale: float = 0.0, dt=0.08, recalc_velocities: bool = False):
     SEED = 42
     torch.manual_seed(SEED)
     if split == "train":
@@ -69,38 +78,47 @@ def preprocess_data(data_dir: Path, split: str, noise_scale: float = 0.0, dt=0.0
                 graphs.append(graph)
             whole_trajectory_batch = Batch.from_data_list(graphs)
             len_traj = len(graphs)
-            x_next = whole_trajectory_batch.x.reshape(len_traj, -1, 3)[1:]
-            for i, graph in enumerate(graphs):
-                if i > 48:
+
+            x = whole_trajectory_batch.x.reshape(len_traj, -1, 3)
+            v, a = calculate_kinematics(x, dt)
+
+            v_next = v[1:]
+            x_next = x[1:]
+            # mesh position is just mesh at rest
+            u = x[0]
+
+            for t, graph in enumerate(graphs):
+                if t > 48:
                     break
                 traj_idx.append(idx)
                 boundary_condition = graph.x_bc  # 1 fixed, 0 free
                 node_force = graph.x_node_force  # external force on node
-                x = graph.x
                 noise = noise_scale * torch.randn_like(x)
-
-                x = x + noise
-                v = (x_next[i] - x - noise) / dt
+                _x = x[t] 
+                _v = v[t]
+                _a = a[t]
 
                 categorical_node_features.append(boundary_condition)
-                valued_node_features.append(torch.concat([x, v, node_force], dim=1))
+                valued_node_features.append(torch.concat([_x, _v, u, node_force], dim=1))
                 train_graphs.append(
                     Data(
                         edge_index=graph.edge_index,
                         t=graph.time,
-                        y_acc_t=graph.y_acc_t,
-                        y_pos_t=x,
-                        y_vel_t=v,
+                        y_acc_t=_a,
+                        y_pos_t=_x,
+                        y_vel_t=_v,
                     )
                 )
 
                 src, dst = graph.edge_index
                 xij = x[dst] - x[src]
+                uij = u[dst] - u[src]
                 xij_norm = torch.norm(xij, dim=1).unsqueeze(1)
-                edge_features.append(torch.concat([xij, xij_norm], dim=1))
+                uij_norm = torch.norm(uij, dim=1).unsqueeze(1)
+                edge_features.append(torch.concat([xij, xij_norm, uij, uij_norm], dim=1))
 
                 von_mises = compute_von_mises_3d(graph.y_sig_t).unsqueeze(1)
-                targets.append(torch.concat([graph.y_acc_t, von_mises], dim=1))
+                targets.append(torch.concat([_a, von_mises], dim=1))
 
         node_stats = compute_stats(valued_node_features)
         edge_stats = compute_stats(edge_features)
@@ -116,15 +134,15 @@ def preprocess_data(data_dir: Path, split: str, noise_scale: float = 0.0, dt=0.0
         with open(stats_dir / "stats.json", "w") as f:
             json.dump(stats, f, indent=4)
 
-        for i in range(len(train_graphs)):
-            _valued_node_features = normalize(valued_node_features[i], node_stats)
-            _edge_features = normalize(edge_features[i], edge_stats)
-            _targets = normalize(targets[i], target_stats)
-            train_graphs[i].x = torch.concat(
-                [categorical_node_features[i], _valued_node_features], dim=1
+        for t in range(len(train_graphs)):
+            _valued_node_features = normalize(valued_node_features[t], node_stats)
+            _edge_features = normalize(edge_features[t], edge_stats)
+            _targets = normalize(targets[t], target_stats)
+            train_graphs[t].x = torch.concat(
+                [categorical_node_features[t], _valued_node_features], dim=1
             )
-            train_graphs[i].edge_attr = _edge_features
-            train_graphs[i].y = _targets
+            train_graphs[t].edge_attr = _edge_features
+            train_graphs[t].y = _targets
         ### save file
 
         save_dir = Path("dataset/beam/train")
@@ -139,7 +157,7 @@ def preprocess_data(data_dir: Path, split: str, noise_scale: float = 0.0, dt=0.0
             torch.save(graphs, file_path)
     elif split == "test" or split == "val":
         # only load one trajector
-        data_dir = data_dir / "train" / "graphs"
+        data_dir = data_dir / split / "graphs"
         filenames = list(data_dir.glob("*.pt"))
         filename = filenames[0]
         print(f"Processing file: {filename}")
@@ -152,6 +170,7 @@ def preprocess_data(data_dir: Path, split: str, noise_scale: float = 0.0, dt=0.0
         len_traj = len(dataloader)
         x_next = whole_trajectory_batch.x.reshape(len_traj, -1, 3)[1:]
         v_next = whole_trajectory_batch.x_vel_t.reshape(len_traj, -1, 3)[1:]
+        u = graphs[0].x  # mesh at rest
         node_force_next = whole_trajectory_batch.x_node_force.reshape(len_traj, -1, 3)[
             1:
         ]
@@ -164,22 +183,26 @@ def preprocess_data(data_dir: Path, split: str, noise_scale: float = 0.0, dt=0.0
         target_stats = Stats.from_dict(stats_dict["target"])
 
         test_graphs = []
-        for i, graph in enumerate(graphs):
-            if i > 48:
+        for t, graph in enumerate(graphs):
+            if t > 48:
                 break
             boundary_condition = graph.x_bc  # 1 fixed, 0 free
             node_force = graph.x_node_force  # external force on node
             x = graph.x
             # no noise added during test
             x = x
-            v = (x_next[i] - x) / dt
+            if recalc_velocities:
+                v = (x_next[t] - x) / dt
+            else:
+                v = graph.x_vel_t
 
-            valued_node_features = torch.concat([x, v, node_force], dim=1)
-
+            valued_node_features = torch.concat([x, v, u, node_force], dim=1)
             src, dst = graph.edge_index
             xij = x[dst] - x[src]
+            uij = u[dst] - u[src]
             xij_norm = torch.norm(xij, dim=1).unsqueeze(1)
-            edge_features = torch.concat([xij, xij_norm], dim=1)
+            uij_norm = torch.norm(uij, dim=1).unsqueeze(1)
+            edge_features = torch.concat([xij, xij_norm, uij, uij_norm], dim=1)
 
             von_mises = compute_von_mises_3d(graph.y_sig_t).unsqueeze(1)
 
@@ -198,12 +221,13 @@ def preprocess_data(data_dir: Path, split: str, noise_scale: float = 0.0, dt=0.0
                     x_pos_t=graph.x,
                     x_vel_t=v,
                     node_force=node_force,
-                    node_force_next=node_force_next[i],
-                    x_next=x_next[i],
-                    v_next=v_next[i],
+                    node_force_next=node_force_next[t],
+                    x_next=x_next[t],
+                    v_next=v_next[t],
                     y_acc_t=graph.y_acc_t,
                     y_von_mises=von_mises,
                     x_element_connectivity=graph.x_element_connectivity,
+                    u=u,
                 )
             )
         save_dir = Path(f"dataset/beam/{split}")

@@ -1,3 +1,4 @@
+from typing_extensions import Literal
 import torch
 from torch_geometric.data import Data
 from torch_geometric.loader import DataLoader
@@ -19,6 +20,8 @@ def do_rollout(
     device: torch.device,
     skip_first: int = 0,
     skip_after: int = 99999999,
+    dont_rollout: bool = False,
+    integrator: Literal["semiimplicit_euler", "explicit_euler", "trapezoidal"] = "semiimplicit_euler",
 ):
     """returns `error_x, error_v, error_stress, true_rollout, pred_rollout`"""
     with torch.no_grad():
@@ -29,13 +32,18 @@ def do_rollout(
         true_rollout = []
         pred_rollout = []
         for t, graph in enumerate(test_loader):
+            u = graph.u
             if t < skip_first:
                 continue
             if t > skip_after:
                 break
             if t == skip_first:
                 input_graph = graph
+            if dont_rollout:
+                input_graph = graph
             pred = model(input_graph.to(device))
+            input_graph = input_graph.cpu()
+            pred = pred.cpu()
 
             pred_denorm = denormalize(pred, target_stats)
             # a_true = graph.y_acc_t
@@ -52,7 +60,7 @@ def do_rollout(
             boundary_condition = graph.x[:, 0]  # 1 fixed, 0 free
 
             v_new = v + a * dt
-            x_new = x + 0.5 * (v + v_new) * dt
+            x_new = x + v_new * dt 
             x_new[boundary_condition == 1] = x[boundary_condition == 1]
             v_new[boundary_condition == 1] = 0.0
 
@@ -74,13 +82,15 @@ def do_rollout(
             node_force = graph.node_force_next  # external force on node is known
 
             categorical_node_features = boundary_condition.unsqueeze(1)
-            valued_node_features = torch.concat([x_new, v_new, node_force], dim=1)
+            valued_node_features = torch.concat([x_new, v_new, u, node_force], dim=1)
 
             src, dst = graph.edge_index
             xij = x_new[dst] - x_new[src]
             xij_norm = torch.norm(xij, dim=1).unsqueeze(1)
+            uij = u[dst] - u[src]
+            uij_norm = torch.norm(uij, dim=1).unsqueeze(1)
 
-            edge_features = torch.concat([xij, xij_norm], dim=1)
+            edge_features = torch.concat([xij, xij_norm, uij, uij_norm], dim=1)
 
             _edge_attr = normalize(edge_features, edge_stats)
             _x = torch.concat(

@@ -49,7 +49,7 @@ def denormalize(tensor: torch.Tensor, stats: Stats, eps: float = 1e-8) -> torch.
     return tensor * (stats.std + eps) + stats.mean
 
 def calculate_kinematics(x: Tensor, dt: float) -> tuple[Tensor, Tensor]:
-    v0 = torch.zeros(1, x.shape[1], device=x.device, dtype=x.dtype)
+    v0 = torch.zeros(*x[0].shape, device=x.device, dtype=x.dtype).unsqueeze(0)
     dx = x[1:] - x[:-1] 
     v_steps = dx / dt
     v = torch.cat([v0, v_steps], dim=0)
@@ -57,19 +57,48 @@ def calculate_kinematics(x: Tensor, dt: float) -> tuple[Tensor, Tensor]:
     a =  dv / dt
     return v, a
 
+
+def build_valued_node_features(x: Tensor, v: Tensor, u: Tensor, node_force: Tensor) -> Tensor:
+    """Build valued node features: [position, velocity, rest_position, node_force]"""
+    return torch.concat([x, v, u, node_force], dim=1)
+
+
+def build_edge_features(x: Tensor, u: Tensor, edge_index: Tensor) -> Tensor:
+    """Build edge features: [relative_position, relative_position_norm, rest_relative_position, rest_relative_position_norm]"""
+    src, dst = edge_index
+    xij = x[dst] - x[src]
+    uij = u[dst] - u[src]
+    xij_norm = torch.norm(xij, dim=1).unsqueeze(1)
+    uij_norm = torch.norm(uij, dim=1).unsqueeze(1)
+    return torch.concat([xij, xij_norm, uij, uij_norm], dim=1)
+
+
+def load_stats(stats_path: Path = Path("./Results/train/stats/stats.json")) -> tuple[Stats, Stats, Stats]:
+    """Load normalization statistics from JSON file"""
+    with open(stats_path, "r") as f:
+        stats_dict = json.load(f)
+    node_stats = Stats.from_dict(stats_dict["node"])
+    edge_stats = Stats.from_dict(stats_dict["edge"])
+    target_stats = Stats.from_dict(stats_dict["target"])
+    return node_stats, edge_stats, target_stats
+
+
 def preprocess_data(data_dir: Path, split: str, noise_scale: float = 0.0, dt=0.08, recalc_velocities: bool = False):
     SEED = 42
     torch.manual_seed(SEED)
-    if split == "train":
-        data_dir = data_dir / "train" / "graphs"
+
+    if True:
+        data_dir = data_dir / f"{split}" / "graphs"
         filenames = list(data_dir.glob("*.pt"))
 
-        train_graphs = []
+        out_graphs = []
         categorical_node_features = []
         valued_node_features = []
         edge_features = []
         traj_idx = []
         targets = []
+        if split!="train":
+            node_stats, edge_stats, target_stats = load_stats()
         for idx, filename in enumerate(filenames):
             dataloader = torch.load(filename, weights_only=False)
             graphs = []
@@ -82,162 +111,115 @@ def preprocess_data(data_dir: Path, split: str, noise_scale: float = 0.0, dt=0.0
             x = whole_trajectory_batch.x.reshape(len_traj, -1, 3)
             v, a = calculate_kinematics(x, dt)
 
+            if split=="train":
+                noise = noise_scale * torch.randn_like(v)
+                x = x + noise
+                v = v - noise / dt  # adjust velocity accordingly
+
             v_next = v[1:]
             x_next = x[1:]
-            # mesh position is just mesh at rest
-            u = x[0]
-
+            u = x[0] # mesh position is just mesh at rest
+            all_node_force = whole_trajectory_batch.x_node_force.reshape(len_traj, -1, 3)
+            boundary_condition = graphs[0].x_bc  # 1 fixed, 0 free, does not change over time
             for t, graph in enumerate(graphs):
                 if t > 48:
                     break
                 traj_idx.append(idx)
-                boundary_condition = graph.x_bc  # 1 fixed, 0 free
-                node_force = graph.x_node_force  # external force on node
+                _node_force = all_node_force[t]
                 noise = noise_scale * torch.randn_like(x)
                 _x = x[t] 
                 _v = v[t]
                 _a = a[t]
 
-                categorical_node_features.append(boundary_condition)
-                valued_node_features.append(torch.concat([_x, _v, u, node_force], dim=1))
-                train_graphs.append(
-                    Data(
+                _categorical_node_attr = boundary_condition
+                _node_attr = build_valued_node_features(_x, _v, u, _node_force)
+                _edge_attr = build_edge_features(_x, u, graph.edge_index)
+
+                von_mises = torch.log(compute_von_mises_3d(graph.y_sig_t).unsqueeze(1) + 1e-6)
+                
+                if split!="train":
+                    edge_attr = normalize(_edge_attr, edge_stats)
+                    vector_node_attr = normalize(_node_attr, node_stats)
+                    categorical_node_attr = _categorical_node_attr
+                    node_attr = torch.concat([categorical_node_attr, vector_node_attr], dim=1)
+
+                    out_graphs.append(
+                        Data(
+                        x=node_attr,
+                        edge_attr=edge_attr,
                         edge_index=graph.edge_index,
+                        # additional eval info
                         t=graph.time,
-                        y_acc_t=_a,
-                        y_pos_t=_x,
-                        y_vel_t=_v,
+                        x_pos_t=x[t],
+                        x_vel_t=v[t],
+                        node_force=all_node_force[t],
+                        node_force_next=all_node_force[t+1],
+                        x_next=x_next[t],
+                        v_next=v_next[t],
+                        y_acc_t=a[t],
+                        y_von_mises=von_mises,
+                        x_element_connectivity=graph.x_element_connectivity,
+                        u=u,
                     )
+                    )
+                else:
+
+                    categorical_node_features.append(boundary_condition)
+                    valued_node_features.append(build_valued_node_features(_x, _v, u, _node_force))
+                    edge_features.append(build_edge_features(_x, u, graph.edge_index))
+                    out_graphs.append(
+                        Data(
+                            edge_index=graph.edge_index,
+                            t=graph.time,
+                            y_acc_t=_a,
+                            y_pos_t=_x,
+                            y_vel_t=_v,
+                        )
+                    )
+                    targets.append(torch.concat([_a, von_mises], dim=1))
+        if split=="train":
+            node_stats = compute_stats(valued_node_features)
+            edge_stats = compute_stats(edge_features)
+            target_stats = compute_stats(targets)
+
+            stats = {
+                "node": node_stats.to_dict(),
+                "edge": edge_stats.to_dict(),
+                "target": target_stats.to_dict(),
+            }
+            stats_dir = Path("./Results/train/stats")
+            stats_dir.mkdir(parents=True, exist_ok=True)
+            with open(stats_dir / "stats.json", "w") as f:
+                json.dump(stats, f, indent=4)
+
+            for t in range(len(out_graphs)):
+                _valued_node_features = normalize(valued_node_features[t], node_stats)
+                _edge_features = normalize(edge_features[t], edge_stats)
+                _targets = normalize(targets[t], target_stats)
+                out_graphs[t].x = torch.concat(
+                    [categorical_node_features[t], _valued_node_features], dim=1
                 )
+                out_graphs[t].edge_attr = _edge_features
+                out_graphs[t].y = _targets
+            ### save file
 
-                src, dst = graph.edge_index
-                xij = x[dst] - x[src]
-                uij = u[dst] - u[src]
-                xij_norm = torch.norm(xij, dim=1).unsqueeze(1)
-                uij_norm = torch.norm(uij, dim=1).unsqueeze(1)
-                edge_features.append(torch.concat([xij, xij_norm, uij, uij_norm], dim=1))
-
-                von_mises = compute_von_mises_3d(graph.y_sig_t).unsqueeze(1)
-                targets.append(torch.concat([_a, von_mises], dim=1))
-
-        node_stats = compute_stats(valued_node_features)
-        edge_stats = compute_stats(edge_features)
-        target_stats = compute_stats(targets)
-
-        stats = {
-            "node": node_stats.to_dict(),
-            "edge": edge_stats.to_dict(),
-            "target": target_stats.to_dict(),
-        }
-        stats_dir = Path("./Results/train/stats")
-        stats_dir.mkdir(parents=True, exist_ok=True)
-        with open(stats_dir / "stats.json", "w") as f:
-            json.dump(stats, f, indent=4)
-
-        for t in range(len(train_graphs)):
-            _valued_node_features = normalize(valued_node_features[t], node_stats)
-            _edge_features = normalize(edge_features[t], edge_stats)
-            _targets = normalize(targets[t], target_stats)
-            train_graphs[t].x = torch.concat(
-                [categorical_node_features[t], _valued_node_features], dim=1
-            )
-            train_graphs[t].edge_attr = _edge_features
-            train_graphs[t].y = _targets
-        ### save file
-
-        save_dir = Path("dataset/beam/train")
+        save_dir = Path(f"dataset/beam/{split}")
         save_dir.mkdir(parents=True, exist_ok=True)
         for traj in set(traj_idx):
             print(f"Processing trajectory: {traj}")
             graphs = [
-                graph for idx, graph in zip(traj_idx, train_graphs) if idx == traj
+                graph for idx, graph in zip(traj_idx, out_graphs) if idx == traj
             ]
             print(f"Length of trajectory {traj}: {len(graphs)}")
             file_path = save_dir / f"graph_{traj:02d}.pt"
             torch.save(graphs, file_path)
-    elif split == "test" or split == "val":
-        # only load one trajector
-        data_dir = data_dir / split / "graphs"
-        filenames = list(data_dir.glob("*.pt"))
-        filename = filenames[0]
-        print(f"Processing file: {filename}")
-        dataloader = torch.load(filename, weights_only=False)
-        graphs = []
-        for data in dataloader:
-            graph = data.to("cpu")
-            graphs.append(graph)
-            whole_trajectory_batch = Batch.from_data_list(graphs)
-        len_traj = len(dataloader)
-        x_next = whole_trajectory_batch.x.reshape(len_traj, -1, 3)[1:]
-        v_next = whole_trajectory_batch.x_vel_t.reshape(len_traj, -1, 3)[1:]
-        u = graphs[0].x  # mesh at rest
-        node_force_next = whole_trajectory_batch.x_node_force.reshape(len_traj, -1, 3)[
-            1:
-        ]
-        print(x_next.shape, v_next.shape, node_force_next.shape)
-
-        with open("./Results/train/stats/stats.json", "r") as f:
-            stats_dict = json.load(f)
-        node_stats = Stats.from_dict(stats_dict["node"])
-        edge_stats = Stats.from_dict(stats_dict["edge"])
-        target_stats = Stats.from_dict(stats_dict["target"])
-
-        test_graphs = []
-        for t, graph in enumerate(graphs):
-            if t > 48:
-                break
-            boundary_condition = graph.x_bc  # 1 fixed, 0 free
-            node_force = graph.x_node_force  # external force on node
-            x = graph.x
-            # no noise added during test
-            x = x
-            if recalc_velocities:
-                v = (x_next[t] - x) / dt
-            else:
-                v = graph.x_vel_t
-
-            valued_node_features = torch.concat([x, v, u, node_force], dim=1)
-            src, dst = graph.edge_index
-            xij = x[dst] - x[src]
-            uij = u[dst] - u[src]
-            xij_norm = torch.norm(xij, dim=1).unsqueeze(1)
-            uij_norm = torch.norm(uij, dim=1).unsqueeze(1)
-            edge_features = torch.concat([xij, xij_norm, uij, uij_norm], dim=1)
-
-            von_mises = compute_von_mises_3d(graph.y_sig_t).unsqueeze(1)
-
-            _x = torch.concat(
-                [boundary_condition, normalize(valued_node_features, node_stats)], dim=1
-            )
-            _edge_attr = normalize(edge_features, edge_stats)
-
-            test_graphs.append(
-                Data(
-                    x=_x,
-                    edge_attr=_edge_attr,
-                    edge_index=graph.edge_index,
-                    # additional eval info
-                    t=graph.time,
-                    x_pos_t=graph.x,
-                    x_vel_t=v,
-                    node_force=node_force,
-                    node_force_next=node_force_next[t],
-                    x_next=x_next[t],
-                    v_next=v_next[t],
-                    y_acc_t=graph.y_acc_t,
-                    y_von_mises=von_mises,
-                    x_element_connectivity=graph.x_element_connectivity,
-                    u=u,
-                )
-            )
-        save_dir = Path(f"dataset/beam/{split}")
-        save_dir.mkdir(parents=True, exist_ok=True)
-        file_path = save_dir / "graph_00.pt"
-        torch.save(test_graphs, file_path)
-        print(f"Saved test graphs to {file_path}")
-
 
 if __name__ == "__main__":
-    data_dir = Path("Results/train/graphs")
-    split = "test"
-    preprocess_data(data_dir, split)
+    from pathlib import Path
+
+    print("Preprocessing training data...")
+    preprocess_data(data_dir=Path("Results/"), split="train", noise_scale=0.0001, recalc_velocities=True)
+
+    print()
+    print("Preprocessing test data...")
+    preprocess_data(data_dir=Path("Results/"), split="val", recalc_velocities=True)

@@ -1,4 +1,5 @@
 import os
+import time
 from pathlib import Path
 
 import numpy as np
@@ -8,7 +9,7 @@ from torch_geometric.data import Data
 from typing_extensions import Literal
 
 from preprocess_data import Stats
-from rollout_utils import do_rollout
+from rollout_utils import do_rollout, mae
 
 
 class Trainer:
@@ -30,6 +31,7 @@ class Trainer:
     def __init__(
         self, model, optimizer, device, loss_type: Literal["mse", "mae"] = "mse"
     ):
+        self.training_id = time.strftime("%Y-%m-%d_%H-%M-%S")
         self.model = model
         self.optimizer = optimizer
         self.device = device
@@ -43,29 +45,45 @@ class Trainer:
             self.loss_fn = F.mse_loss
         # Training and test history
         self.train_history = []
+        self.train_acc_history = []
+        self.train_stress_history = []
         self.extr_test_history = []
         self.gen_test_history = []
 
         # Create a directory for saving trained models
         self.cur_dir = os.getcwd()
-        self.model_dir = Path(self.cur_dir) / "saved_models"
+        self.model_dir = Path(self.cur_dir) / "saved_models" / self.training_id
         self.model_dir.mkdir(parents=True, exist_ok=True)
         self.gen_loss = 0.0  # Initialize generalization loss
         self.epoch_losses = []
+        self.train_acc_loss = []
+        self.train_stress_loss = []
 
     def train(self, graph: Data):
         self.model.train()
         # Forward pass through the model
-        pred = self.model(graph)
-        target = graph.y.to(self.device)
-
+        pred: torch.Tensor = self.model(graph)
+        target: torch.Tensor = graph.y.to(self.device)
         # Compute MSE loss
         loss = self.loss_fn(pred, target)
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
 
+        pred_acc = pred[:, :3].contiguous()
+        target_acc = target[:, :3].contiguous()
+        pred_stress = pred[:, 3].contiguous()
+        target_stress = target[:, 3].contiguous()
+
+        stress_loss = self.loss_fn(pred_stress, target_stress)
+        acc_loss = self.loss_fn(pred_acc, target_acc)
+
+        # loss = acc_loss + stress_loss
+
         # Store loss history
+        self.train_acc_loss.append(acc_loss.cpu().detach().numpy())
+        self.train_stress_loss.append(stress_loss.cpu().detach().numpy())
+
         self.loss = loss.cpu().detach().numpy()
         self.train_history.append(self.loss)
         self.gen_loss_pos = 0.0
@@ -73,7 +91,14 @@ class Trainer:
         self.gen_loss_stress = 0.0
         self.epoch_losses.append(self.loss)
 
+        self.history_full_rollout_loss = []
+
     def epoch_end(self):
+        self.train_acc_history.append(self.train_acc_loss)
+        self.train_stress_history.append(self.train_stress_loss)
+
+        self.train_acc_loss = []
+        self.train_stress_loss = []
         self.loss = np.mean(self.epoch_losses)
         self.epoch_losses = []
 
@@ -88,7 +113,7 @@ class Trainer:
         self.model.eval()  # Set model to evaluation modes
 
         # Perform model rollout testing
-        error_x, error_v, error_stress, true_rollout, pred_rollout = do_rollout(
+        true_rollout, pred_rollout = do_rollout(
             model=self.model,
             test_loader=test_loader,
             device=self.device,
@@ -97,23 +122,19 @@ class Trainer:
             target_stats=target_stats,
             dt=dt,
         )
+        rollout_error = mae(true_rollout[-1].x_pos_t, pred_rollout[-1].x_pos_t)
 
         # Compute generalization errors
-        self.gen_loss_pos = np.sum(error_x) / len(error_x)
-        self.gen_loss_vel = np.sum(error_v) / len(error_v)
-        self.gen_loss_stress = np.sum(error_stress) / len(error_stress)
+        self.rollout_all_step_error = rollout_error
 
-        # Store overall test loss history
-        self.gen_test_history.append(
-            self.gen_loss_pos + self.gen_loss_vel + self.gen_loss_stress
-        )
+        self.history_full_rollout_loss.append(self.rollout_all_step_error)
 
     def save_model(self, epoch: int = None):
         self.model_dir.mkdir(parents=True, exist_ok=True)
         # Save model using the generalization loss as part of the filename
         if epoch is not None:
-            filename = f"Epoch_{epoch}_GenLoss_{self.gen_loss_pos:.2f}m_{self.gen_loss_vel:.2f}mps_{self.gen_loss_stress:.2f}Nms2.pth"
+            filename = f"Epoch_{epoch}_GenLoss_{self.rollout_all_step_error:.10f}.pth"
         else:
-            filename = f"GenLoss_{self.gen_loss_pos:.2f}m_{self.gen_loss_vel:.2f}mps_{self.gen_loss_stress:.2f}Nms2.pth"
+            filename = f"GenLoss_{self.rollout_all_step_error:.10f}.pth"
         self.path = self.model_dir / filename
         torch.save(self.model.state_dict(), self.path)

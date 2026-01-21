@@ -490,7 +490,7 @@ def fea_simulation(
         f"T{total_time}_Tc{cutoff_time_factor * total_time}_Nsteps{num_steps}"
     )
 
-    save_path = "./Results"
+    save_path = "./Results_large"
     if not os.path.exists(save_path):
         os.makedirs(save_path)
 

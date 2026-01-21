@@ -28,8 +28,8 @@ def run_simulations():
 
     # For 'train' dataset
     forces = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5]
-    lengths = [0.5, 0.75, 1.0]
-    widths = [0.1, 0.14, 0.06]
+    lengths = [0.5, 0.6, 0.75, 0.8, 0.9, 1.0]
+    widths = [0.1, 0.11, 0.12, 0.14, 0.08, 0.06]
 
     param_combinations = list(product(forces, lengths, widths))
     print(f"Total simulations to run: {len(param_combinations)}")

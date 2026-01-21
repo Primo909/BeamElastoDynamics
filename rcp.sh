@@ -1,5 +1,5 @@
 #IMAGE_NAME=nvcr.io/nvidia/pyg:24.07-py3
-IMAGE_NAME="registry.rcp.epfl.ch/imos-ksteiner/base_image:1.0.1"
+IMAGE_NAME="registry.rcp.epfl.ch/imos-ksteiner/base_image:latest"
 export $(cat .rcp.env | xargs)
 #--cpu 6 \
 #--memory 32 \

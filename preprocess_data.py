@@ -83,7 +83,7 @@ def load_stats(stats_path: Path = Path("./Results/train/stats/stats.json")) -> t
     return node_stats, edge_stats, target_stats
 
 
-def preprocess_data(data_dir: Path, split: str, noise_scale: float = 0.0, dt=0.08, recalc_velocities: bool = False):
+def preprocess_data(data_dir: Path, split: str, noise_scale: float = 0.0, dt=0.08, recalc_velocities: bool = False, target_dir: Path = Path("dataset/beam/")):
     SEED = 42
     torch.manual_seed(SEED)
 
@@ -100,6 +100,7 @@ def preprocess_data(data_dir: Path, split: str, noise_scale: float = 0.0, dt=0.0
         if split!="train":
             node_stats, edge_stats, target_stats = load_stats()
         for idx, filename in enumerate(filenames):
+            print(f"Processing file: {filename} ({idx+1}/{len(filenames)})")
             dataloader = torch.load(filename, weights_only=False)
             graphs = []
             for data in dataloader:
@@ -203,7 +204,7 @@ def preprocess_data(data_dir: Path, split: str, noise_scale: float = 0.0, dt=0.0
                 out_graphs[t].y = _targets
             ### save file
 
-        save_dir = Path(f"dataset/beam/{split}")
+        save_dir = Path(f"{target_dir}/{split}")
         save_dir.mkdir(parents=True, exist_ok=True)
         for traj in set(traj_idx):
             print(f"Processing trajectory: {traj}")

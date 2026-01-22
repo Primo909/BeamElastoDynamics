@@ -1,11 +1,14 @@
 pipeline/
 Results/
+Results_large/
 saved_models/
 *.gif
 .DS_Store
 .vscode/
 *.pt
 *.env
+wandb/
+ZZ_random_notebooks/
 
 
 # Byte-compiled / optimized / DLL files

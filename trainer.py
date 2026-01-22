@@ -8,6 +8,8 @@ import torch.nn.functional as F
 from torch_geometric.data import Data
 from typing_extensions import Literal
 
+import wandb
+from make_gif import make_beam_comparison_gif
 from preprocess_data import Stats
 from rollout_utils import do_rollout, mae
 
@@ -29,12 +31,20 @@ class Trainer:
     """
 
     def __init__(
-        self, model, optimizer, device, loss_type: Literal["mse", "mae"] = "mse"
+        self,
+        model,
+        optimizer,
+        device,
+        loss_type: Literal["mse", "mae"] = "mse",
+        use_wandb: bool = False,
     ):
         self.training_id = time.strftime("%Y-%m-%d_%H-%M-%S")
+        self.run = wandb.init(mode="disabled") if not use_wandb else wandb.init()
+
         self.model = model
         self.optimizer = optimizer
         self.device = device
+
         if loss_type == "mse":
             self.loss_fn = F.mse_loss
         elif loss_type == "mae":
@@ -93,14 +103,17 @@ class Trainer:
 
         self.history_full_rollout_loss = []
 
-    def epoch_end(self):
-        self.train_acc_history.append(self.train_acc_loss)
-        self.train_stress_history.append(self.train_stress_loss)
-
+    def epoch_end(self, epoch: int):
+        data = {
+            "train/loss": self.loss,
+            "train/acc_loss": np.mean(self.train_acc_loss),
+            "train/stress_loss": np.mean(self.train_stress_loss),
+        }
+        self.run.log(data, step=epoch)
+        # Reset epoch losses
+        self.epoch_losses = []
         self.train_acc_loss = []
         self.train_stress_loss = []
-        self.loss = np.mean(self.epoch_losses)
-        self.epoch_losses = []
 
     def test(
         self,
@@ -109,6 +122,7 @@ class Trainer:
         edge_stats: Stats,
         target_stats: Stats,
         dt: float,
+        epoch: int,
     ):
         self.model.eval()  # Set model to evaluation modes
 
@@ -124,10 +138,23 @@ class Trainer:
         )
         rollout_error = mae(true_rollout[-1].x_pos_t, pred_rollout[-1].x_pos_t)
 
+        gif_path = self.model_dir / f"Epoch_{epoch}_beam_comparison.gif"
+        make_beam_comparison_gif(
+            pred_rollout=pred_rollout,
+            true_rollout=true_rollout,
+            L=1.0,
+            W=0.1,
+            D=0.04,  # Beam dimensions
+            out_gif=gif_path,
+            fps=4,
+        )
+        data = {
+            "val/gen_rollout_error": rollout_error,
+            "val/beam_comparison_gif": wandb.Video(str(gif_path), fps=4, format="gif"),
+        }
+        self.run.log(data, step=epoch)
         # Compute generalization errors
         self.rollout_all_step_error = rollout_error
-
-        self.history_full_rollout_loss.append(self.rollout_all_step_error)
 
     def save_model(self, epoch: int = None):
         self.model_dir.mkdir(parents=True, exist_ok=True)

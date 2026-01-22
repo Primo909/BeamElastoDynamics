@@ -1,14 +1,18 @@
 import os
 import shutil
 import time
-from pathlib import Path
 
 import imageio
+import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 from torch_geometric.data import Data
+
+# Turn off interactive mode for faster plotting
+matplotlib.use("Agg")
+plt.ioff()
 
 
 def compute_von_mises_3d(stress_9):
@@ -95,6 +99,39 @@ def make_beam_comparison_gif(
     y_min, y_max = np.min(all_y), np.max(all_y)
     z_min, z_max = np.min(all_z), np.max(all_z)
 
+    # Create figure and axes once (reuse for all frames)
+    fig, axarr = plt.subplots(1, 2, figsize=(16, 8), subplot_kw={"projection": "3d"})
+
+    cmap = plt.cm.jet
+    norm = plt.Normalize(vmin=vm_min, vmax=vm_max)
+
+    # Create colorbar once
+    cbar_ax = fig.add_axes([0.92, 0.2, 0.02, 0.6])
+    cbar = plt.colorbar(plt.cm.ScalarMappable(norm=norm, cmap=cmap), cax=cbar_ax)
+    cbar.set_label("von Mises Stress")
+
+    # Pre-build polygon structure (reuse geometry)
+    polys_indices = []
+    for tet in cells:
+        polys_indices.append(tet[:3])  # Use first 3 vertices for a face
+    polys_indices = np.array(polys_indices)
+
+    # Initialize collections (will update their data each frame)
+    polycoll_true = None
+    polycoll_pred = None
+
+    # Configure axes once
+    for ax, title in zip(axarr, ["Ground Truth", "Predicted MeshGraphNet"]):
+        ax.set_xlim(x_min, x_max)
+        ax.set_ylim(y_min, y_max)
+        ax.set_zlim(z_min, z_max)
+        ax.set_xlabel("X")
+        ax.set_ylabel("Y")
+        ax.set_zlabel("Z")
+        ax.set_box_aspect((L * 0.1, 0.8 * W, 2.5 * D))
+        ax.view_init(elev=30, azim=45)
+        ax.set_title(title)
+
     # Iterate over time steps to create frames
     for i, (graph_pred, graph_true) in enumerate(zip(pred_rollout, true_rollout)):
         print(f"Rendering frame {i}/{len(pred_rollout) - 1}")
@@ -105,62 +142,36 @@ def make_beam_comparison_gif(
         vm_pred = graph_pred.von_mises.cpu().numpy()
         vm_true = graph_true.von_mises.cpu().numpy()
 
-        fig, axarr = plt.subplots(
-            1, 2, figsize=(16, 8), subplot_kw={"projection": "3d"}
-        )
-
-        cmap = plt.cm.jet
-        norm = plt.Normalize(vmin=vm_min, vmax=vm_max)
-
-        # Function to plot a beam in 3D with element connectivity
-        def plot_beam(ax, coords, vm, title):
-            polys = []
-            face_values = []
-            for tet in cells:
-                tet_coords = coords[tet]  # No offset needed for separate subplots
-                polys.append(tet_coords[:3])  # Use first 3 vertices for a face
-                face_values.append(np.mean(vm[tet]))  # Interpolated stress
-
-            face_values = np.array(face_values)
+        # Function to update beam data efficiently
+        def update_beam(ax, coords, vm, polycoll_existing):
+            # Build polygons and face colors using vectorized numpy operations
+            polys = coords[polys_indices]
+            face_values = np.mean(vm[polys_indices], axis=1)
             face_colors = cmap(norm(face_values))
 
-            polycoll = Poly3DCollection(polys)
-            polycoll.set_facecolors(face_colors)
-            polycoll.set_edgecolor("none")
-            ax.add_collection3d(polycoll)
+            # Update existing collection or create new one
+            if polycoll_existing is None:
+                polycoll = Poly3DCollection(polys)
+                polycoll.set_facecolors(face_colors)
+                polycoll.set_edgecolor("none")
+                ax.add_collection3d(polycoll)
+                return polycoll
+            else:
+                polycoll_existing.set_verts(polys)
+                polycoll_existing.set_facecolors(face_colors)
+                return polycoll_existing
 
-            ax.set_xlim(x_min, x_max)
-            ax.set_ylim(y_min, y_max)
-            ax.set_zlim(z_min, z_max)
+        # Update both subplots
+        polycoll_true = update_beam(axarr[0], coords_true, vm_true, polycoll_true)
+        polycoll_pred = update_beam(axarr[1], coords_pred, vm_pred, polycoll_pred)
 
-            ax.set_xlabel("X")
-            ax.set_ylabel("Y")
-            ax.set_zlabel("Z")
+        # Render to numpy array
+        fig.canvas.draw()
+        frame = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
+        frame = frame.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+        frames.append(frame)
 
-            ax.set_box_aspect((L * 0.1, 0.8 * W, 2.5 * D))
-            ax.view_init(elev=30, azim=45)
-            ax.set_title(title)
-
-        # Left subplot: Ground Truth
-        plot_beam(axarr[0], coords_true, vm_true, title="Ground Truth")
-
-        # Right subplot: Predicted
-        plot_beam(axarr[1], coords_pred, vm_pred, title="Predicted MeshGraphNet")
-
-        cbar_ax = fig.add_axes([0.92, 0.2, 0.02, 0.6])  # (left, bottom, width, height)
-        cbar = plt.colorbar(plt.cm.ScalarMappable(norm=norm, cmap=cmap), cax=cbar_ax)
-        cbar.set_label("von Mises Stress")
-        # cb = fig.colorbar(mappable, ax=axarr.ravel().tolist(), shrink=0.6)
-        # cb.set_label("von Mises Stress")
-
-        frame_path = os.path.join(temp_dir, f"frame_{i:03d}.png")
-        frame_path = Path(frame_path)
-        frame_path.parent.mkdir(parents=True, exist_ok=True)
-        plt.tight_layout(rect=[0, 0, 0.9, 1])
-        plt.savefig(frame_path, dpi=100)
-        plt.close(fig)
-
-        frames.append(imageio.imread(frame_path))
+    plt.close(fig)
 
     # Create GIF
     imageio.mimsave(out_gif, frames, fps=fps, loop=0)

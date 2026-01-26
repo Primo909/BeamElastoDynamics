@@ -50,7 +50,7 @@ from torch_geometric.loader import DataLoader
 
 from in_memory_dataset import InMemoryTimeStepDataset
 
-test_dataset = InMemoryTimeStepDataset(sample_dir="dataset/beam/val")
+test_dataset = InMemoryTimeStepDataset(sample_dir="dataset/beam/test")
 test_dataloader = DataLoader(test_dataset, batch_size=1, shuffle=False)
 with open("Results/train/stats/stats.json", "r") as f:
     stats = json.load(f)
@@ -67,7 +67,7 @@ true_rollout, pred_rollout = do_rollout(
     target_stats=target_stats,
     dt=dt,
     skip_first=0,
-    rollout_steps=30,
+    rollout_steps=999,
     dont_rollout=no_rollout,
 )
 
@@ -78,6 +78,6 @@ make_beam_comparison_gif(
     L=1.0,
     W=0.1,
     D=0.04,  # Beam dimensions
-    out_gif=f"beam_comparison_{checkpoint_path.name}.gif",
+    out_gif=f"beam_comparison_{checkpoint_path.name}_model_id_{checkpoint_path.parent.stem}.gif",
     fps=4,
 )

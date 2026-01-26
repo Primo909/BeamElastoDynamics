@@ -9,6 +9,7 @@ saved_models/
 *.env
 wandb/
 ZZ_random_notebooks/
+Results*/
 
 
 # Byte-compiled / optimized / DLL files

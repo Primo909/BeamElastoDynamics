@@ -5,12 +5,13 @@ from pathlib import Path
 import numpy as np
 import torch
 import torch.nn.functional as F
+from gpytoolbox import volume
 from torch_geometric.data import Data
 from typing_extensions import Literal
 
 import wandb
 from make_gif import make_beam_comparison_gif
-from preprocess_data import Stats
+from preprocess_data import Stats, denormalize
 from rollout_utils import do_rollout, mae
 
 
@@ -68,14 +69,59 @@ class Trainer:
         self.epoch_losses = []
         self.train_acc_loss = []
         self.train_stress_loss = []
+        self.train_volume_loss = []
 
-    def train(self, graph: Data):
+    def train(
+        self,
+        graph: Data,
+        node_stats: Stats,
+        edge_stats: Stats,
+        target_stats: Stats,
+    ):
         self.model.train()
         # Forward pass through the model
         pred: torch.Tensor = self.model(graph)
         target: torch.Tensor = graph.y.to(self.device)
+        #
+        _pred = pred.detach().cpu()
+        pred_denorm = denormalize(_pred, target_stats).to(self.device)
+        a = pred_denorm[:, :3]
+
+        dt = 0.08
+
+        batch_dim = graph.batch.max().item() + 1
+        x = np.array(
+            [
+                graph.x_pos_t[graph.batch == i].cpu().detach().numpy()
+                for i in range(batch_dim)
+            ]
+        )
+        v = np.array(
+            [
+                graph.x_vel_t[graph.batch == i].cpu().detach().numpy()
+                for i in range(batch_dim)
+            ]
+        )
+        a = np.array(
+            [a[graph.batch == i].cpu().detach().numpy() for i in range(batch_dim)]
+        )
+        v_new = v + a * dt
+        x_new = x + v_new * dt
+        Volume = torch.tensor(graph.volume)
+        print(graph)
+        print(x_new.shape)
+        print(graph.cells)
+        print(f"Volume.shape: {Volume.shape}")
+        new_Volume = torch.tensor(
+            [np.abs(volume(x_new[i], graph.cells[0])) for i in range(batch_dim)]
+        )
+        print(f"Old Volume: {Volume}")
+        print(f"New Volume: {new_Volume}")
+        Volume_loss = (
+            self.loss_fn(Volume.to(self.device), new_Volume.to(self.device)) / 4e-6
+        )
         # Compute MSE loss
-        loss = self.loss_fn(pred, target)
+        loss = self.loss_fn(pred, target) + Volume_loss
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
@@ -93,6 +139,7 @@ class Trainer:
         # Store loss history
         self.train_acc_loss.append(acc_loss.cpu().detach().numpy())
         self.train_stress_loss.append(stress_loss.cpu().detach().numpy())
+        self.train_volume_loss.append(Volume_loss.cpu().detach().numpy())
 
         self.loss = loss.cpu().detach().numpy()
         self.train_history.append(self.loss)
@@ -108,12 +155,14 @@ class Trainer:
             "train/loss": self.loss,
             "train/acc_loss": np.mean(self.train_acc_loss),
             "train/stress_loss": np.mean(self.train_stress_loss),
+            "train/volume_loss": np.mean(self.train_volume_loss),
         }
         self.run.log(data, step=epoch)
         # Reset epoch losses
         self.epoch_losses = []
         self.train_acc_loss = []
         self.train_stress_loss = []
+        self.train_volume_loss = []
 
     def test(
         self,

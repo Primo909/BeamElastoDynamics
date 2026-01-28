@@ -1,13 +1,57 @@
-from typing_extensions import Literal
 import torch
 from torch_geometric.data import Data
 from torch_geometric.loader import DataLoader
+from typing_extensions import Literal
 
 from preprocess_data import Stats, denormalize, normalize
 
 
 def mae(target, pred):
     return torch.mean(torch.abs(target - pred))
+
+
+def build_mgn_graph_from_timestep(
+    simulation_graph: Data,
+    x_new: torch.Tensor,
+    v_new: torch.Tensor,
+    u: torch.Tensor,
+    node_stats: Stats,
+    edge_stats: Stats,
+    target_stats: Stats,
+):
+    input_graph = simulation_graph
+
+    boundary_condition = simulation_graph.x[:, 0]  # 1 fixed, 0 free
+    node_force = simulation_graph.node_force_next  # external force on node is known
+
+    categorical_node_features = boundary_condition.unsqueeze(1)
+    valued_node_features = torch.concat([x_new, v_new, u, node_force], dim=1)
+
+    src, dst = simulation_graph.edge_index
+    xij = x_new[dst] - x_new[src]
+    xij_norm = torch.norm(xij, dim=1).unsqueeze(1)
+    uij = u[dst] - u[src]
+    uij_norm = torch.norm(uij, dim=1).unsqueeze(1)
+
+    edge_features = torch.concat([xij, xij_norm, uij, uij_norm], dim=1)
+
+    _edge_attr = normalize(edge_features, edge_stats)
+    _x = torch.concat(
+        [
+            categorical_node_features,
+            normalize(valued_node_features, node_stats),
+        ],
+        dim=1,
+    )
+    _x[-1] = simulation_graph.x[
+        -1
+    ]  # Keep the force node features from the future unchanges
+    input_graph.x = _x
+    input_graph.edge_attr = _edge_attr
+    input_graph.x_pos_t = x_new
+    input_graph.x_vel_t = v_new
+    input_graph.node_force = node_force
+    return input_graph
 
 
 def do_rollout(
@@ -19,15 +63,15 @@ def do_rollout(
     dt: float,
     device: torch.device,
     skip_first: int = 0,
-    skip_after: int = 99999999,
+    rollout_steps: int = 99999999,
     dont_rollout: bool = False,
-    integrator: Literal["semiimplicit_euler", "explicit_euler", "trapezoidal"] = "semiimplicit_euler",
+    integrator: Literal[
+        "semiimplicit_euler", "explicit_euler", "trapezoidal"
+    ] = "semiimplicit_euler",
 ):
     """returns `error_x, error_v, error_stress, true_rollout, pred_rollout`"""
     with torch.no_grad():
         # Store errors for evaluation
-        error_x = []
-        error_v = []
         error_stress = []
         true_rollout = []
         pred_rollout = []
@@ -35,7 +79,7 @@ def do_rollout(
             u = graph.u
             if t < skip_first:
                 continue
-            if t > skip_after:
+            if t > rollout_steps:
                 break
             if t == skip_first:
                 input_graph = graph
@@ -60,54 +104,24 @@ def do_rollout(
             boundary_condition = graph.x[:, 0]  # 1 fixed, 0 free
 
             v_new = v + a * dt
-            x_new = x + v_new * dt 
+            x_new = x + v_new * dt
             x_new[boundary_condition == 1] = x[boundary_condition == 1]
             v_new[boundary_condition == 1] = 0.0
 
             # Use new graph to calculate error
             x_true = graph.x_next
             v_true = graph.v_next
-            mae_pos = mae(x_true, x_new)
-            mae_vel = mae(v_true, v_new)
-            mae_stress = mae(von_mises_true, von_mises)
-
-            error_x.append(mae_pos)
-            error_v.append(mae_vel)
-            error_stress.append(mae_stress)
 
             # Prepare input graph for the next time step
-            input_graph = graph
-
-            boundary_condition = graph.x[:, 0]  # 1 fixed, 0 free
-            node_force = graph.node_force_next  # external force on node is known
-
-            categorical_node_features = boundary_condition.unsqueeze(1)
-            valued_node_features = torch.concat([x_new, v_new, u, node_force], dim=1)
-
-            src, dst = graph.edge_index
-            xij = x_new[dst] - x_new[src]
-            xij_norm = torch.norm(xij, dim=1).unsqueeze(1)
-            uij = u[dst] - u[src]
-            uij_norm = torch.norm(uij, dim=1).unsqueeze(1)
-
-            edge_features = torch.concat([xij, xij_norm, uij, uij_norm], dim=1)
-
-            _edge_attr = normalize(edge_features, edge_stats)
-            _x = torch.concat(
-                [
-                    categorical_node_features,
-                    normalize(valued_node_features, node_stats),
-                ],
-                dim=1,
+            input_graph = build_mgn_graph_from_timestep(
+                simulation_graph=graph,
+                x_new=x_new,
+                v_new=v_new,
+                u=u,
+                node_stats=node_stats,
+                edge_stats=edge_stats,
+                target_stats=target_stats,
             )
-            _x[-1] = graph.x[
-                -1
-            ]  # Keep the force node features from the future unchanges
-            input_graph.x = _x
-            input_graph.edge_attr = _edge_attr
-            input_graph.x_pos_t = x_new
-            input_graph.x_vel_t = v_new
-            input_graph.node_force = node_force
 
             # Store rollouts for visualization
             true_rollout.append(
@@ -126,4 +140,4 @@ def do_rollout(
                     x_element_connectivity=graph.x_element_connectivity,
                 )
             )
-    return error_x, error_v, error_stress, true_rollout, pred_rollout
+    return true_rollout, pred_rollout

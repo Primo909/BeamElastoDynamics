@@ -5,7 +5,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from gpytoolbox import volume
+from mesh_utils import volume
 from torch import Tensor
 from torch_geometric.data import Batch, Data
 
@@ -23,6 +23,11 @@ class Stats:
     @classmethod
     def from_dict(cls, d):
         return cls(mean=torch.tensor(d["mean"]), std=torch.tensor(d["std"]))
+
+    def to(self, device):
+        self.mean = self.mean.to(device)
+        self.std = self.std.to(device)
+        return self
 
 
 def compute_stats(tensor_list) -> Stats:
@@ -150,9 +155,9 @@ def preprocess_data(
                 _x = x[t]
                 _v = v[t]
                 _a = a[t]
-                cells = graph.x_element_connectivity[0]
-                Volume = np.abs(volume(_x.numpy(), cells))
-                next_Volume = np.abs(volume(x_next[t].numpy(), cells))
+                cells = torch.tensor(graph.x_element_connectivity[0]).to(torch.long)
+                Volume = np.abs(volume(_x, cells))
+                next_Volume = np.abs(volume(x_next[t], cells))
                 _categorical_node_attr = boundary_condition
                 _node_attr = build_valued_node_features(_x, _v, u, _node_force)
                 _edge_attr = build_edge_features(_x, u, graph.edge_index)

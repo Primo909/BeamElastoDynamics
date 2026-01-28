@@ -5,12 +5,12 @@ from pathlib import Path
 import numpy as np
 import torch
 import torch.nn.functional as F
-from gpytoolbox import volume
 from torch_geometric.data import Data
 from typing_extensions import Literal
 
 import wandb
 from make_gif import make_beam_comparison_gif
+from mesh_utils import batched_tetrahedron_volumes
 from preprocess_data import Stats, denormalize
 from rollout_utils import do_rollout, mae
 
@@ -77,51 +77,41 @@ class Trainer:
         node_stats: Stats,
         edge_stats: Stats,
         target_stats: Stats,
+        volume_loss_weight: float | int = False,
     ):
         self.model.train()
         # Forward pass through the model
         pred: torch.Tensor = self.model(graph)
         target: torch.Tensor = graph.y.to(self.device)
         #
-        _pred = pred.detach().cpu()
-        pred_denorm = denormalize(_pred, target_stats).to(self.device)
-        a = pred_denorm[:, :3]
+        if not volume_loss_weight:
+            loss = self.loss_fn(pred, target)
+            Volume_loss = torch.tensor(0.0)
+        else:
+            target_stats.to(self.device)
+            pred_denorm = denormalize(pred, target_stats)
+            # reshape graph to original graphs
+            a = pred_denorm[:, :3].reshape(len(graph), -1, 3)
+            v = graph.x_vel_t.reshape(len(graph), -1, 3)
+            x = graph.x_pos_t.reshape(len(graph), -1, 3)
+            dt = 0.08
 
-        dt = 0.08
+            v_new = v + a * dt
+            x_new = x + v_new * dt
+            Volume = torch.tensor(graph.volume).squeeze()
+            cells = torch.tensor(graph.cells).squeeze().to(torch.long)
 
-        batch_dim = graph.batch.max().item() + 1
-        x = np.array(
-            [
-                graph.x_pos_t[graph.batch == i].cpu().detach().numpy()
-                for i in range(batch_dim)
-            ]
-        )
-        v = np.array(
-            [
-                graph.x_vel_t[graph.batch == i].cpu().detach().numpy()
-                for i in range(batch_dim)
-            ]
-        )
-        a = np.array(
-            [a[graph.batch == i].cpu().detach().numpy() for i in range(batch_dim)]
-        )
-        v_new = v + a * dt
-        x_new = x + v_new * dt
-        Volume = torch.tensor(graph.volume)
-        print(graph)
-        print(x_new.shape)
-        print(graph.cells)
-        print(f"Volume.shape: {Volume.shape}")
-        new_Volume = torch.tensor(
-            [np.abs(volume(x_new[i], graph.cells[0])) for i in range(batch_dim)]
-        )
-        print(f"Old Volume: {Volume}")
-        print(f"New Volume: {new_Volume}")
-        Volume_loss = (
-            self.loss_fn(Volume.to(self.device), new_Volume.to(self.device)) / 4e-6
-        )
-        # Compute MSE loss
-        loss = self.loss_fn(pred, target) + Volume_loss
+            # print(f"Volume.shape: {Volume.shape}")
+            new_Volume = batched_tetrahedron_volumes(x=x_new, cells=cells).flatten()
+            # print(f"Old Volume: {Volume.shape}")
+            # print(f"New Volume: {new_Volume.shape}")
+            Volume_loss = (
+                self.loss_fn(Volume.to(self.device), new_Volume.to(self.device))
+                / 4e-6
+                / 2e-8
+            )
+            # Compute MSE loss
+            loss = self.loss_fn(pred, target) + Volume_loss * volume_loss_weight
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
@@ -174,7 +164,7 @@ class Trainer:
         epoch: int,
     ):
         self.model.eval()  # Set model to evaluation modes
-
+        target_stats.to("cpu")
         # Perform model rollout testing
         true_rollout, pred_rollout = do_rollout(
             model=self.model,

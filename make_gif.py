@@ -10,6 +10,8 @@ import torch
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 from torch_geometric.data import Data
 
+from mesh_utils import volume
+
 # Turn off interactive mode for faster plotting
 matplotlib.use("Agg")
 plt.ioff()
@@ -43,6 +45,29 @@ class RolloutGraph(Data):
     x_vel_t: torch.Tensor
     von_mises: torch.Tensor
     x_element_connectivity: torch.Tensor
+
+
+def plot_volume_change(pred_rollout, true_rollout, path):
+    fig, ax = plt.subplots()
+    for pred, true in zip(pred_rollout, true_rollout):
+        x_true = true.x_pos_t
+        x_pred = pred.x_pos_t
+        cells = torch.tensor(true.x_element_connectivity[0][0])
+        print(x_true.shape, x_pred.shape, cells.shape)
+        true_volumes = volume(x_true, cells)
+        pred_volumes = volume(x_pred, cells)
+
+        V_true = np.abs(true_volumes).sum()
+        V_pred = np.abs(pred_volumes).sum()
+
+        true_volumes_list.append(V_true)
+        pred_volumes_list.append(V_pred)
+        ax.plot(true_volumes_list, label="True Volumes")
+    ax.plot(pred_volumes_list, label="Predicted Volumes")
+    plt.xlabel("Time Step")
+    plt.ylabel("Volume")
+    ax.legend()
+    plt.savefig(path)
 
 
 def make_beam_comparison_gif(

@@ -1,6 +1,48 @@
 import subprocess
 import sys
 from itertools import product
+from pathlib import Path
+
+import numpy as np
+from tqdm import tqdm
+
+RESULTS_DIR = Path("Results_large_10_pow_3/train/graphs/")
+
+
+def filename_from_params(params):
+    """simulation_name = (
+        f"L{L}_W{W}_D{D}_NL{NL}_NW{NW}_ND{ND}_"
+        f"E{E}_nu{nu}_rho{density}_"
+        f"em{eta_m_val}_ek{eta_k_val}"
+        f"_Pix{initial_force_x}_Piy{initial_force_y}_Piz{initial_force_z}_"
+        f"T{total_time}_Tc{cutoff_time_factor * total_time}_Nsteps{num_steps}"
+    )
+    """
+    L = params["L"]
+    W = params["W"]
+    D = params["D"]
+    NL = params["NL"]
+    NW = params["NW"]
+    ND = params["ND"]
+    E = params["E"]
+    nu = params["nu"]
+    density = params["rho"]
+    eta_m_val = params["eta_m"]
+    eta_k_val = params["eta_k"]
+    initial_force_x = params.get("initial_force_x", 0.0)
+    initial_force_y = params.get("initial_force_y", 0.0)
+    initial_force_z = params.get("initial_force_z", 0.0)
+    total_time = params["total_time"]
+    cutoff_time_factor = params["cutoff_time_factor"]
+    num_steps = params["num_steps"]
+    simulation_name = (
+        f"graphsL{L}_W{W}_D{D}_NL{NL}_NW{NW}_ND{ND}_"
+        f"E{E}_nu{nu}_rho{density}_"
+        f"em{eta_m_val}_ek{eta_k_val}"
+        f"_Pix{initial_force_x}_Piy{initial_force_y}_Piz{initial_force_z}_"
+        f"T{total_time}_Tc{cutoff_time_factor * total_time}_Nsteps{num_steps}"
+    )
+    return RESULTS_DIR / f"{simulation_name}.pt"
 
 
 def run_simulations():
@@ -27,14 +69,24 @@ def run_simulations():
     }
 
     # For 'train' dataset
-    forces = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5]
-    lengths = [0.5, 0.6, 0.75, 0.8, 0.9, 1.0]
-    widths = [0.1, 0.11, 0.12, 0.14, 0.08, 0.06]
+    # forces = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5]
+    # lengths = [0.5, 0.6, 0.75, 0.8, 0.9, 1.0]
+    # widths = [0.1, 0.11, 0.12, 0.14, 0.08, 0.06]
+
+    # check if filename already exists, if so, skip
+    n_samples = 10
+
+    forces = list(np.linspace(0.25, 1.5, n_samples))
+    lengths = list(np.linspace(0.5, 1.0, n_samples))
+    widths = list(np.linspace(0.06, 0.14, n_samples))
 
     param_combinations = list(product(forces, lengths, widths))
     print(f"Total simulations to run: {len(param_combinations)}")
-    for idx, (initial_force_y, L, W) in enumerate(param_combinations):
+    for idx, (initial_force_y, L, W) in tqdm(
+        enumerate(param_combinations), total=len(param_combinations)
+    ):
         print(f"\n=== Simulation Set {idx + 1} ===")
+
         params = default_params.copy()
         params.update(
             {
@@ -44,7 +96,10 @@ def run_simulations():
                 "mode": "train",
             }
         )
-
+        filename = filename_from_params(params)
+        if filename.exists():
+            print(f"Skipping simulation, results already exist at {filename}")
+            continue
         command = build_command(params)
         print(
             f"\nRunning train simulation with initial_force={initial_force_y}, L={L}, W={W}"

@@ -2,6 +2,7 @@ import argparse
 import os
 
 import imageio
+import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
@@ -10,6 +11,8 @@ from fenics import project
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 from torch_geometric.data import Data
 from torch_geometric.loader import DataLoader
+
+matplotlib.use("agg")
 
 
 def extract_edges(mesh):
@@ -490,7 +493,7 @@ def fea_simulation(
         f"T{total_time}_Tc{cutoff_time_factor * total_time}_Nsteps{num_steps}"
     )
 
-    save_path = "./Results_large"
+    save_path = "./Results_large_10_pow_3"
     if not os.path.exists(save_path):
         os.makedirs(save_path)
 

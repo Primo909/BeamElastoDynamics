@@ -14,6 +14,7 @@ elastic-beam-3d
 *.png
 
 
+elastic-beam-3d/
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

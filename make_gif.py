@@ -49,10 +49,12 @@ class RolloutGraph(Data):
 
 def plot_volume_change(pred_rollout, true_rollout, path):
     fig, ax = plt.subplots()
+    true_volumes_list = []
+    pred_volumes_list = []
     for pred, true in zip(pred_rollout, true_rollout):
         x_true = true.x_pos_t
         x_pred = pred.x_pos_t
-        cells = torch.tensor(true.x_element_connectivity[0][0])
+        cells = torch.tensor(true.x_element_connectivity[0][0], dtype=torch.long)
         print(x_true.shape, x_pred.shape, cells.shape)
         true_volumes = volume(x_true, cells)
         pred_volumes = volume(x_pred, cells)
@@ -62,7 +64,7 @@ def plot_volume_change(pred_rollout, true_rollout, path):
 
         true_volumes_list.append(V_true)
         pred_volumes_list.append(V_pred)
-        ax.plot(true_volumes_list, label="True Volumes")
+    ax.plot(true_volumes_list, label="True Volumes")
     ax.plot(pred_volumes_list, label="Predicted Volumes")
     plt.xlabel("Time Step")
     plt.ylabel("Volume")

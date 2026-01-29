@@ -5,11 +5,11 @@ from pathlib import Path
 import numpy as np
 import torch
 import torch.nn.functional as F
+import wandb
 from torch_geometric.data import Data
 from typing_extensions import Literal
 
-import wandb
-from make_gif import make_beam_comparison_gif
+from make_gif import make_beam_comparison_gif, plot_volume_change
 from mesh_utils import batched_tetrahedron_volumes
 from preprocess_data import Stats, denormalize
 from rollout_utils import do_rollout, mae
@@ -78,6 +78,7 @@ class Trainer:
         edge_stats: Stats,
         target_stats: Stats,
         volume_loss_weight: float | int = False,
+        do_full_volume: bool = True,
     ):
         self.model.train()
         # Forward pass through the model
@@ -102,7 +103,9 @@ class Trainer:
             cells = torch.tensor(graph.cells).squeeze().to(torch.long)
 
             # print(f"Volume.shape: {Volume.shape}")
-            new_Volume = batched_tetrahedron_volumes(x=x_new, cells=cells).flatten()
+            new_Volume = batched_tetrahedron_volumes(
+                x=x_new, cells=cells, sum_over_batch=do_full_volume
+            ).flatten()
             # print(f"Old Volume: {Volume.shape}")
             # print(f"New Volume: {new_Volume.shape}")
             volume_frac = new_Volume / Volume
@@ -175,6 +178,8 @@ class Trainer:
         rollout_error = mae(true_rollout[-1].x_pos_t, pred_rollout[-1].x_pos_t)
 
         gif_path = self.model_dir / f"Epoch_{epoch}_beam_comparison.gif"
+        volume_png_path = self.model_dir / f"Epoch_{epoch}_volume_change.png"
+        plot_volume_change(pred_rollout, true_rollout, path=volume_png_path)
         make_beam_comparison_gif(
             pred_rollout=pred_rollout,
             true_rollout=true_rollout,
@@ -187,6 +192,7 @@ class Trainer:
         data = {
             "val/gen_rollout_error": rollout_error,
             "val/beam_comparison_gif": wandb.Video(str(gif_path), fps=4, format="gif"),
+            "val/volume_change_png": wandb.Image(str(volume_png_path)),
         }
         self.run.log(data, step=epoch)
         # Compute generalization errors

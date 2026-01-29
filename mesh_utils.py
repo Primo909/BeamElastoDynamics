@@ -10,14 +10,17 @@ def volume(V: torch.Tensor, T: torch.Tensor) -> torch.Tensor:
     vols = -torch.sum(torch.mul(a - d, torch.cross(b - c, c - d, dim=1)), dim=1) / 6.0
     return vols
 
-def batched_tetrahedron_volumes(x: torch.Tensor, cells: torch.Tensor) -> torch.Tensor:
+
+def batched_tetrahedron_volumes(
+    x: torch.Tensor, cells: torch.Tensor, sum_over_batch: bool = True
+) -> torch.Tensor:
     """
     Calculates volumes matching the user's specific logic and output format.
-    
+
     Args:
         x: (B, N, 3)
         cells: (B, M, 4)
-        
+
     Returns:
         volumes: (B*M)  <-- Flattened to match your loop's output
     """
@@ -27,7 +30,7 @@ def batched_tetrahedron_volumes(x: torch.Tensor, cells: torch.Tensor) -> torch.T
     # We need to grab specific nodes from specific batches
     # batch_idx: (B, M, 4)
     batch_idx = torch.arange(B, device=x.device).view(B, 1, 1).expand(B, M, 4)
-    
+
     # 2. Gather coordinates
     # x[batch_idx, cells] allows us to pick node 'cells[b,m,k]' from batch 'b'
     # Result: (B, M, 4, 3)
@@ -53,19 +56,48 @@ def batched_tetrahedron_volumes(x: torch.Tensor, cells: torch.Tensor) -> torch.T
 
     # 7. Volume and Flatten
     volumes = torch.abs(scalar_triple) / 6.0
-    
+
     # Flatten to (B*M) to match your 'all_volumes' list structure
-    return volumes
+    if sum_over_batch:
+        return volumes.sum(axis=1)
+    else:
+        return volumes
 
 
 if __name__ == "__main__":
     # Simple test
-    v = torch.tensor([
-        [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
-        [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
-    ]
+    v = torch.tensor(
+        [
+            [
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+                [0.0, 0.0, 1.0],
+                [0.0, 0.0, 0.0],
+                [2.0, 0.0, 0.0],
+                [0.0, 2.0, 0.0],
+                [0.0, 0.0, 2.0],
+            ],
+            [
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+                [0.0, 0.0, 1.0],
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+                [0.0, 0.0, 1.0],
+            ],
+        ],
     )
     # This tet is properly oriented
-    t = torch.tensor([[[0, 1, 2, 3],[0, 1, 2, 3]],])
-    vols = batched_tetrahedron_volumes(v, t)
+    t = torch.tensor(
+        [
+            [[0, 1, 2, 3], [0, 4, 5, 6]],
+            [[0, 1, 2, 3], [0, 1, 2, 3]],
+        ]
+    )
+    vols = batched_tetrahedron_volumes(v, t, sum_over_batch=False)
     print("Volume should be 1/6:", vols)
+    vols = batched_tetrahedron_volumes(v, t, sum_over_batch=True)
+    print("Flattened volumes:", vols)

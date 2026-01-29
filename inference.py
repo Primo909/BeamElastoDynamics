@@ -3,7 +3,7 @@ from pathlib import Path
 
 import torch
 
-from make_gif import make_beam_comparison_gif
+from make_gif import make_beam_comparison_gif, plot_volume_change
 from models.vinay_mgn import MeshGraphNet
 from preprocess_data import Stats
 from rollout_utils import do_rollout
@@ -50,13 +50,17 @@ from torch_geometric.loader import DataLoader
 
 from in_memory_dataset import InMemoryTimeStepDataset
 
-test_dataset = InMemoryTimeStepDataset(sample_dir="dataset/beam/test")
+test_dataset = InMemoryTimeStepDataset(sample_dir="dataset/beam/val")
 test_dataloader = DataLoader(test_dataset, batch_size=1, shuffle=False)
 with open("Results/train/stats/stats.json", "r") as f:
     stats = json.load(f)
 node_stats = Stats.from_dict(stats["node"])
 edge_stats = Stats.from_dict(stats["edge"])
 target_stats = Stats.from_dict(stats["target"])
+
+out_name = (
+    f"beam_comparison_{checkpoint_path.name}_model_id_{checkpoint_path.parent.stem}"
+)
 
 true_rollout, pred_rollout = do_rollout(
     model=model,
@@ -71,13 +75,13 @@ true_rollout, pred_rollout = do_rollout(
     dont_rollout=no_rollout,
 )
 
-
+plot_volume_change(pred_rollout, true_rollout, path=f"{out_name}_volume_change.png")
 make_beam_comparison_gif(
     pred_rollout=pred_rollout,
     true_rollout=true_rollout,
     L=1.0,
     W=0.1,
     D=0.04,  # Beam dimensions
-    out_gif=f"beam_comparison_{checkpoint_path.name}_model_id_{checkpoint_path.parent.stem}.gif",
+    out_gif=f"{out_name}.gif",
     fps=4,
 )

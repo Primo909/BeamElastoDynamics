@@ -10,6 +10,8 @@ saved_models/
 wandb/
 ZZ_random_notebooks/
 Results*/
+elastic-beam-3d
+*.png
 
 
 # Byte-compiled / optimized / DLL files

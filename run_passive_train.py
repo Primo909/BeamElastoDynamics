@@ -37,6 +37,12 @@ parser.add_argument(
     default=300,
     help="Total number of training epochs (default: 300)",
 )
+parser.add_argument(
+    "--resume-from",
+    type=str,
+    default=None,
+    help="Path to checkpoint file to resume training from (e.g., saved_models/2026-01-29_07-51-59/Epoch_480_GenLoss_0.0116324676.pth)",
+)
 args = parser.parse_args()
 
 DATASET = "large"
@@ -47,19 +53,19 @@ if DATASET == "large":
 else:
     raise ValueError(f"Unknown DATASET: {DATASET}")
 print("Preprocessing training data...")
-preprocess_data(
-    data_dir=src_folder,
-    split="train",
-    noise_scale=0.0003,
-    recalc_velocities=True,
-    target_dir=target_folder,
-)
+# preprocess_data(
+#     data_dir=src_folder,
+#     split="train",
+#     noise_scale=0.0003,
+#     recalc_velocities=True,
+#     target_dir=target_folder,
+# )
 
-print()
-print("Preprocessing test data...")
-preprocess_data(
-    data_dir=src_folder, split="val", recalc_velocities=True, target_dir=target_folder
-)
+# print()
+# print("Preprocessing test data...")
+# preprocess_data(
+#     data_dir=src_folder, split="val", recalc_velocities=True, target_dir=target_folder
+# )
 
 from torch_geometric.loader import DataLoader
 
@@ -124,9 +130,17 @@ dt = 0.08
 total_epochs = args.epochs
 validation_interval = 20
 
-print(f"Total epochs: {total_epochs}")
+# Handle checkpoint resumption
+start_epoch = 0
+if args.resume_from:
+    resume_epoch = trainer.load_checkpoint(args.resume_from)
+    start_epoch = resume_epoch + 1
+    print(f"Resuming training from epoch {start_epoch}")
 
-epoch_bar = tqdm(range(total_epochs), desc="Epochs")
+print(f"Total epochs: {total_epochs}")
+print(f"Starting from epoch: {start_epoch}")
+
+epoch_bar = tqdm(range(start_epoch, total_epochs), desc="Epochs", initial=start_epoch, total=total_epochs)
 for epoch in epoch_bar:
     for batch in tqdm(train_dataloader, desc="Batches", leave=False):
         # print("hey")
@@ -140,7 +154,7 @@ for epoch in epoch_bar:
             node_stats=node_stats,
             edge_stats=edge_stats,
             target_stats=target_stats,
-            volume_loss_weight=args.volume_loss_weight,
+            volume_loss_weight=volume_loss,
         )
 
     if epoch % validation_interval == 0:

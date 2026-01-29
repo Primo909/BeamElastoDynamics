@@ -156,8 +156,8 @@ def preprocess_data(
                 _v = v[t]
                 _a = a[t]
                 cells = torch.tensor(graph.x_element_connectivity[0]).to(torch.long)
-                Volume = np.abs(volume(_x, cells, sum_over_batch=True))
-                next_Volume = np.abs(volume(x_next[t], cells, sum_over_batch=True))
+                Volume = np.abs(volume(_x, cells))
+                next_Volume = np.abs(volume(x_next[t], cells))
                 _categorical_node_attr = boundary_condition
                 _node_attr = build_valued_node_features(_x, _v, u, _node_force)
                 _edge_attr = build_edge_features(_x, u, graph.edge_index)

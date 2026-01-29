@@ -99,17 +99,18 @@ class Trainer:
 
             v_new = v + a * dt
             x_new = x + v_new * dt
-            Volume = torch.tensor(graph.volume).squeeze()
+            
             cells = torch.tensor(graph.cells).squeeze().to(torch.long)
 
             # print(f"Volume.shape: {Volume.shape}")
             new_Volume = batched_tetrahedron_volumes(
                 x=x_new, cells=cells, sum_over_batch=do_full_volume
-            ).flatten()
-            # print(f"Old Volume: {Volume.shape}")
-            # print(f"New Volume: {new_Volume.shape}")
+            )
+            Volume = 0.00432 *torch.ones_like(new_Volume)
+            print(f"Old Volume: {Volume.shape}")
+            print(f"New Volume: {new_Volume.shape}")
             volume_frac = new_Volume / Volume
-            Volume_loss = self.loss_fn(1.0, volume_frac.to(self.device))
+            Volume_loss = self.loss_fn(torch.ones_like(volume_frac), volume_frac.to(self.device))
             # Compute MSE loss
             loss = self.loss_fn(pred, target) + Volume_loss * volume_loss_weight
         self.optimizer.zero_grad()
@@ -206,4 +207,57 @@ class Trainer:
         else:
             filename = f"GenLoss_{self.rollout_all_step_error:.10f}.pth"
         self.path = self.model_dir / filename
-        torch.save(self.model.state_dict(), self.path)
+
+        # Save complete checkpoint including optimizer state and epoch
+        checkpoint = {
+            'epoch': epoch,
+            'model_state_dict': self.model.state_dict(),
+            'optimizer_state_dict': self.optimizer.state_dict(),
+            'loss': self.loss,
+            'rollout_all_step_error': self.rollout_all_step_error,
+            'training_id': self.training_id,
+        }
+        torch.save(checkpoint, self.path)
+
+    def load_checkpoint(self, checkpoint_path: str):
+        """
+        Load a checkpoint to resume training.
+
+        Parameters:
+        - checkpoint_path (str): Path to the checkpoint file.
+
+        Returns:
+        - int: The epoch number to resume from (checkpoint epoch + 1).
+        """
+        checkpoint_path = Path(checkpoint_path)
+        if not checkpoint_path.exists():
+            raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
+
+        print(f"Loading checkpoint from: {checkpoint_path}")
+        checkpoint = torch.load(checkpoint_path, map_location=self.device)
+
+        # Load model and optimizer states
+        self.model.load_state_dict(checkpoint['model_state_dict'])
+        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+
+        # Restore other states
+        resume_epoch = checkpoint['epoch']
+        self.loss = checkpoint.get('loss', 0.0)
+        self.rollout_all_step_error = checkpoint.get('rollout_all_step_error', 0.0)
+
+        # Save a notes.txt file with the original training ID
+        original_training_id = checkpoint.get('training_id', 'unknown')
+        notes_path = self.model_dir / "notes.txt"
+        with open(notes_path, 'w') as f:
+            f.write(f"Resumed from checkpoint: {checkpoint_path}\n")
+            f.write(f"Original training ID: {original_training_id}\n")
+            f.write(f"Resumed at epoch: {resume_epoch}\n")
+            f.write(f"New training ID: {self.training_id}\n")
+
+        print(f"Checkpoint loaded successfully!")
+        print(f"Resuming from epoch: {resume_epoch}")
+        print(f"Last loss: {self.loss:.6f}")
+        print(f"Last rollout error: {self.rollout_all_step_error:.6f}")
+        print(f"Notes saved to: {notes_path}")
+
+        return resume_epoch

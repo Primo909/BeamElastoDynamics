@@ -12,6 +12,7 @@ ZZ_random_notebooks/
 Results*/
 
 
+elastic-beam-3d/
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

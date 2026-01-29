@@ -4,10 +4,10 @@ export $(cat .rcp.env | xargs)
 #--cpu 6 \
 #--memory 32 \
 export RCP_CAAS_LABSCRATCH=imos-scratch
-COMMAND="cd /scratch/imos-students/ksteiner/BeamElastoDynamics && python run_passive_train.py --volume-loss-weight=0.001 --epochs=500"
+COMMAND="cd /scratch/imos-students/ksteiner/BeamElastoDynamics && python run_passive_train.py --volume-loss-weight=0.0 --epochs=500"
 
 runai submit \
-  --name train-volume-tr0-001-500 \
+  --name train-volume-tru-0-500 \
   --image ${IMAGE_NAME} \
   --gpu 1 \
   --run-as-uid ${LDAP_UID} \

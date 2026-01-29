@@ -78,6 +78,7 @@ class Trainer:
         edge_stats: Stats,
         target_stats: Stats,
         volume_loss_weight: float | int = False,
+        do_full_volume: bool = True,
     ):
         self.model.train()
         # Forward pass through the model
@@ -102,7 +103,9 @@ class Trainer:
             cells = torch.tensor(graph.cells).squeeze().to(torch.long)
 
             # print(f"Volume.shape: {Volume.shape}")
-            new_Volume = batched_tetrahedron_volumes(x=x_new, cells=cells).flatten()
+            new_Volume = batched_tetrahedron_volumes(
+                x=x_new, cells=cells, sum_over_batch=do_full_volume
+            ).flatten()
             # print(f"Old Volume: {Volume.shape}")
             # print(f"New Volume: {new_Volume.shape}")
             Volume_loss = (

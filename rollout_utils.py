@@ -196,7 +196,7 @@ def do_rollout(
     integrator: Literal[
         "semiimplicit_euler", "explicit_euler", "trapezoidal"
     ] = "semiimplicit_euler",
-    preserve_volume: bool = True,
+    preserve_volume: bool = False,
     volume_reference: Literal["rest", "last_step"] = "last_step",
     volume_iters: int = 10,
 ):

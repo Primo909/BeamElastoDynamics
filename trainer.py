@@ -105,11 +105,8 @@ class Trainer:
             new_Volume = batched_tetrahedron_volumes(x=x_new, cells=cells).flatten()
             # print(f"Old Volume: {Volume.shape}")
             # print(f"New Volume: {new_Volume.shape}")
-            Volume_loss = (
-                self.loss_fn(Volume.to(self.device), new_Volume.to(self.device))
-                / 4e-6
-                / 2e-8
-            )
+            volume_frac = new_Volume / Volume
+            Volume_loss = self.loss_fn(1.0, volume_frac.to(self.device))
             # Compute MSE loss
             loss = self.loss_fn(pred, target) + Volume_loss * volume_loss_weight
         self.optimizer.zero_grad()

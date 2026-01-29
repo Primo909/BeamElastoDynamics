@@ -131,6 +131,10 @@ for epoch in epoch_bar:
     for batch in tqdm(train_dataloader, desc="Batches", leave=False):
         # print("hey")
         batch.to(device)
+        if epoch < 300:
+            volume_loss = False
+        else:
+            volume_loss = args.volume_loss_weight
         trainer.train(
             batch,
             node_stats=node_stats,

@@ -43,6 +43,12 @@ parser.add_argument(
     default=None,
     help="Path to checkpoint file to resume training from (e.g., saved_models/2026-01-29_07-51-59/Epoch_480_GenLoss_0.0116324676.pth)",
 )
+parser.add_argument(
+    "--do-full-volume",
+    action=argparse.BooleanOptionalAction,
+    default=True,
+    help="Use full volume computation (default: True). Use --no-do-full-volume to disable.",
+)
 args = parser.parse_args()
 
 DATASET = "large"
@@ -155,6 +161,7 @@ for epoch in epoch_bar:
             edge_stats=edge_stats,
             target_stats=target_stats,
             volume_loss_weight=volume_loss,
+            do_full_volume=args.do_full_volume,
         )
 
     if epoch % validation_interval == 0:

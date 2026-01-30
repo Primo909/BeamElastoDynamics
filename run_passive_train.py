@@ -7,8 +7,6 @@ from tqdm import tqdm
 
 load_dotenv()
 
-from preprocess_data import preprocess_data
-
 
 def parse_volume_loss_weight(value):
     """Parse volume loss weight argument - accepts 'false' or a float value."""
@@ -24,6 +22,13 @@ def parse_volume_loss_weight(value):
 
 parser = argparse.ArgumentParser(
     description="Train MeshGraphNet with optional volume loss weight"
+)
+parser.add_argument(
+    "--dataset",
+    type=str,
+    choices=["small", "medium", "large"],
+    default="large",
+    help="Dataset size to use: small, medium, or large (default: large)",
 )
 parser.add_argument(
     "--volume-loss-weight",
@@ -51,38 +56,24 @@ parser.add_argument(
 )
 args = parser.parse_args()
 
-DATASET = "large"
+DATASET = args.dataset
+base_dir = Path("./elastic-beam-3d")
+processed_dir = base_dir / "processed" / DATASET
 
-if DATASET == "large":
-    src_folder = Path("Results_large/")
-    target_folder = Path("dataset/beam_large/")
-else:
-    raise ValueError(f"Unknown DATASET: {DATASET}")
-print("Preprocessing training data...")
-# preprocess_data(
-#     data_dir=src_folder,
-#     split="train",
-#     noise_scale=0.0003,
-#     recalc_velocities=True,
-#     target_dir=target_folder,
-# )
-
-# print()
-# print("Preprocessing test data...")
-# preprocess_data(
-#     data_dir=src_folder, split="val", recalc_velocities=True, target_dir=target_folder
-# )
+print(f"Using dataset: {DATASET}")
+print(f"Processed data directory: {processed_dir}")
 
 from torch_geometric.loader import DataLoader
 
-from in_memory_dataset import InMemoryTimeStepDataset
+from in_memory_dataset import InMemoryTimeStepDataset, LazyTimeStepDataset
 
 if DATASET == "large":
-    target_folder = Path("dataset/beam_large/")
+    train_dataset = LazyTimeStepDataset(
+        sample_dir=processed_dir / "train" / "graphs", num_time_steps=49
+    )
 else:
-    raise ValueError(f"Unknown DATASET: {DATASET}")
-train_dataset = InMemoryTimeStepDataset(sample_dir=target_folder / "train")
-test_dataset = InMemoryTimeStepDataset(sample_dir=target_folder / "val")
+    train_dataset = InMemoryTimeStepDataset(sample_dir=processed_dir / "train" / "graphs")
+test_dataset = InMemoryTimeStepDataset(sample_dir=processed_dir / "val" / "graphs")
 
 batch_size = 16
 num_workers = 4
@@ -125,8 +116,9 @@ import json
 
 from preprocess_data import Stats
 
-print("Loading stats...")
-with open("Results/train/stats/stats.json", "r") as f:
+stats_path = processed_dir / "train" / "stats" / "stats.json"
+print(f"Loading stats from {stats_path}...")
+with open(stats_path, "r") as f:
     stats = json.load(f)
 node_stats = Stats.from_dict(stats["node"])
 edge_stats = Stats.from_dict(stats["edge"])

@@ -3,13 +3,13 @@ IMAGE_NAME="registry.rcp.epfl.ch/imos-ksteiner/base_image:latest"
 export $(cat .rcp.env | xargs)
 #--cpu 6 \
 #--memory 32 \
+partition="large"
 export RCP_CAAS_LABSCRATCH=imos-scratch
-#COMMAND="cd /scratch/imos-students/ksteiner/BeamElastoDynamics && python run_passive_train.py --volume-loss-weight=0.3 --epochs=700 --resume-from=saved_models/2026-01-29_15-16-04/Epoch_280_GenLoss_0.0122079654.pth --no-do-full-volume"
-COMMAND="cd /scratch/imos-students/ksteiner/BeamElastoDynamics && python run_passive_train.py --dataset large --epochs 500"
+COMMAND="cd /scratch/imos-students/ksteiner/BeamElastoDynamics && python run_preprocess.py --dataset $partition --skip-download"
+
 runai submit \
-  --name large-500 \
+  --name preprocess-$partition \
   --image ${IMAGE_NAME} \
-  --gpu 1 \
   --run-as-uid ${LDAP_UID} \
   --run-as-gid ${LDAP_GID} \
   --existing-pvc "claimname=${RCP_CAAS_LABSCRATCH},path=/scratch" \

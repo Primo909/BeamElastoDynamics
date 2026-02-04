@@ -19,7 +19,9 @@ def displacement_u1(z1, z2, w, h, a, b):
 
 def displacement_u2(z1, z2, w, h, a, b):
     """Compute u2 component of displacement."""
-    return ((z1 - w / 2) ** 2 * b - 0.3) * (z2 - h / 2)
+    c = w * h / (2 * (1 + a)) * 1.3
+    print(f"c = {c}")
+    return ((z1 - w / 2) ** 2 * b - c) * (z2 - h / 2)
 
 
 def displacement(Z1, Z2, w, h, a, b):
@@ -326,7 +328,7 @@ if __name__ == "__main__":
     # Default parameters
     w = 1.0  # width
     h = 0.5  # height
-    a = 0.01  # deformation parameter
+    a = 0.1  # deformation parameter
     b = 2 * h / (w * (1 + a))  # deformation parameter
     lam = 1.0  # First Lamé parameter
     mu = 1.0  # Second Lamé parameter (shear modulus)

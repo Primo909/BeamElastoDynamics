@@ -5,10 +5,10 @@ from pathlib import Path
 import numpy as np
 import torch
 import torch.nn.functional as F
-import wandb
 from torch_geometric.data import Data
 from typing_extensions import Literal
 
+import wandb
 from make_gif import make_beam_comparison_gif, plot_volume_change
 from mesh_utils import batched_tetrahedron_volumes
 from preprocess_data import Stats, denormalize
@@ -112,7 +112,7 @@ class Trainer:
                 Volume = graph.volume
             print(f"Old Volume: {Volume.shape}")
             print(f"New Volume: {new_Volume.shape}")
-            volume_frac = new_Volume / Volume
+            volume_frac = new_Volume.flatten() / Volume.flatten()
             Volume_loss = self.loss_fn(
                 torch.ones_like(volume_frac), volume_frac.to(self.device)
             )

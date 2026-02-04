@@ -102,6 +102,7 @@ def preprocess_data(
     dt=0.08,
     recalc_velocities: bool = False,
     target_dir: Path = Path("dataset/beam/"),
+    stats_dir: Path | None = None,
 ):
     SEED = 42
     torch.manual_seed(SEED)
@@ -116,8 +117,11 @@ def preprocess_data(
         edge_features = []
         traj_idx = []
         targets = []
+        _stats_dir = stats_dir if stats_dir is not None else Path("./Results/train/stats")
         if split != "train":
-            node_stats, edge_stats, target_stats = load_stats()
+            node_stats, edge_stats, target_stats = load_stats(
+                stats_path=_stats_dir / "stats.json"
+            )
         for idx, filename in enumerate(filenames):
             print(f"Processing file: {filename} ({idx + 1}/{len(filenames)})")
             dataloader = torch.load(filename, weights_only=False)
@@ -222,9 +226,8 @@ def preprocess_data(
                 "edge": edge_stats.to_dict(),
                 "target": target_stats.to_dict(),
             }
-            stats_dir = Path("./Results/train/stats")
-            stats_dir.mkdir(parents=True, exist_ok=True)
-            with open(stats_dir / "stats.json", "w") as f:
+            _stats_dir.mkdir(parents=True, exist_ok=True)
+            with open(_stats_dir / "stats.json", "w") as f:
                 json.dump(stats, f, indent=4)
 
             for t in range(len(out_graphs)):
@@ -238,7 +241,7 @@ def preprocess_data(
                 out_graphs[t].y = _targets
             ### save file
 
-        save_dir = Path(f"{target_dir}/{split}")
+        save_dir = target_dir / split / "graphs"
         save_dir.mkdir(parents=True, exist_ok=True)
         for traj in set(traj_idx):
             print(f"Processing trajectory: {traj}")
@@ -251,14 +254,25 @@ def preprocess_data(
 if __name__ == "__main__":
     from pathlib import Path
 
+    target = Path("dataset/beam/")
+    stats = target / "train" / "stats"
+
     print("Preprocessing training data...")
     preprocess_data(
         data_dir=Path("Results/"),
         split="train",
         noise_scale=0.0001,
         recalc_velocities=True,
+        target_dir=target,
+        stats_dir=stats,
     )
 
     print()
     print("Preprocessing test data...")
-    preprocess_data(data_dir=Path("Results/"), split="val", recalc_velocities=True)
+    preprocess_data(
+        data_dir=Path("Results/"),
+        split="val",
+        recalc_velocities=True,
+        target_dir=target,
+        stats_dir=stats,
+    )

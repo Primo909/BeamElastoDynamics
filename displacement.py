@@ -93,6 +93,30 @@ def compute_stress_sigma_ij(Z1, Z2, w, h, a, b, lam, mu, i, j):
     return sigma_ij
 
 
+def compute_von_mises_stress(Z1, Z2, w, h, a, b, lam, mu):
+    """Compute von Mises stress for 2D plane stress.
+
+    von Mises stress: σ_vm = sqrt(σ₁₁² - σ₁₁σ₂₂ + σ₂₂² + 3σ₁₂²)
+
+    Args:
+        Z1, Z2: Mesh coordinates
+        w, h, a, b: Deformation parameters
+        lam: First Lamé parameter (lambda)
+        mu: Second Lamé parameter (shear modulus)
+
+    Returns:
+        sigma_vm: Von Mises stress at each mesh point
+    """
+    sigma_11 = compute_stress_sigma_ij(Z1, Z2, w, h, a, b, lam, mu, 1, 1)
+    sigma_22 = compute_stress_sigma_ij(Z1, Z2, w, h, a, b, lam, mu, 2, 2)
+    sigma_12 = compute_stress_sigma_ij(Z1, Z2, w, h, a, b, lam, mu, 1, 2)
+
+    sigma_vm = jnp.sqrt(
+        sigma_11**2 - sigma_11 * sigma_22 + sigma_22**2 + 3 * sigma_12**2
+    )
+    return sigma_vm
+
+
 def compute_stress_divergence(Z1, Z2, w, h, a, b, lam, mu):
     """Compute divergence of stress tensor: div(σ)_i = ∂σ_ij/∂z_j.
 
@@ -183,13 +207,16 @@ def plot_configurations(
     si, sj = stress_ij
     stress = compute_stress_sigma_ij(Z1, Z2, w, h, a, b, lam, mu, i=si, j=sj)
 
+    # Compute von Mises stress
+    von_mises = compute_von_mises_stress(Z1, Z2, w, h, a, b, lam, mu)
+
     # Subscript labels
     subscripts = {1: "₁", 2: "₂"}
     strain_label = f"e{subscripts[ei]}{subscripts[ej]}"
     stress_label = f"σ{subscripts[si]}{subscripts[sj]}"
 
-    # Create figure with 2x2 subplots
-    fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(14, 10))
+    # Create figure with 2x3 subplots
+    fig, ((ax1, ax2, ax3), (ax4, ax5, ax6)) = plt.subplots(2, 3, figsize=(18, 10))
 
     # Plot original configuration
     ax1.plot(Z1, Z2, "b-", linewidth=0.5)
@@ -257,6 +284,26 @@ def plot_configurations(
     cbar2 = fig.colorbar(pcm2, ax=ax4)
     cbar2.set_label(stress_label)
 
+    # Plot deformed configuration with von Mises stress colormap
+    pcm3 = ax5.pcolormesh(
+        np.array(X1),
+        np.array(X2),
+        np.array(von_mises),
+        shading="auto",
+        cmap="jet",
+    )
+    ax5.plot(X1, X2, "k-", linewidth=0.3, alpha=0.5)
+    ax5.plot(X1.T, X2.T, "k-", linewidth=0.3, alpha=0.5)
+    ax5.set_xlabel("x₁")
+    ax5.set_ylabel("x₂")
+    ax5.set_title("Von Mises Stress σ_vm")
+    ax5.set_aspect("equal")
+    cbar3 = fig.colorbar(pcm3, ax=ax5)
+    cbar3.set_label("σ_vm")
+
+    # Hide the unused 6th subplot
+    ax6.axis("off")
+
     # Compute axis limits based on data extent
     all_x = np.concatenate([np.array(Z1).flatten(), np.array(X1).flatten()])
     all_y = np.concatenate([np.array(Z2).flatten(), np.array(X2).flatten()])
@@ -266,7 +313,7 @@ def plot_configurations(
     y_margin = 0.1 * (y_max - y_min)
 
     # Set axis limits
-    for ax in [ax1, ax2, ax3, ax4]:
+    for ax in [ax1, ax2, ax3, ax4, ax5]:
         ax.set_xlim(x_min - x_margin, x_max + x_margin)
         ax.set_ylim(y_min - y_margin, y_max + y_margin)
 

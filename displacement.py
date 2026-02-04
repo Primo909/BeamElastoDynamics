@@ -221,6 +221,7 @@ def plot_configurations(
     ax2.set_title("Deformed Configuration with Displacement Field")
     ax2.set_aspect("equal")
     ax2.grid(True, alpha=0.3)
+    ax2.legend(loc="upper left")
 
     # Plot deformed configuration with strain colormap
     pcm1 = ax3.pcolormesh(
@@ -256,10 +257,18 @@ def plot_configurations(
     cbar2 = fig.colorbar(pcm2, ax=ax4)
     cbar2.set_label(stress_label)
 
+    # Compute axis limits based on data extent
+    all_x = np.concatenate([np.array(Z1).flatten(), np.array(X1).flatten()])
+    all_y = np.concatenate([np.array(Z2).flatten(), np.array(X2).flatten()])
+    x_min, x_max = all_x.min(), all_x.max()
+    y_min, y_max = all_y.min(), all_y.max()
+    x_margin = 0.1 * (x_max - x_min)
+    y_margin = 0.1 * (y_max - y_min)
+
     # Set axis limits
     for ax in [ax1, ax2, ax3, ax4]:
-        ax.set_xlim(-0.1 * w, (1 + 1.3 * a) * w)
-        ax.set_ylim(-0.1 * h, (1 + 1.3) * h)
+        ax.set_xlim(x_min - x_margin, x_max + x_margin)
+        ax.set_ylim(y_min - y_margin, y_max + y_margin)
 
     plt.tight_layout()
     plt.savefig("displacement_plot.png", dpi=150)
